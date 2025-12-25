@@ -1,0 +1,34 @@
+# Ignore build directory
+build/
+
+# Ignore install directory
+install/
+
+# Ignore log directory
+log/
+
+# Ignore .venv
+.venv/
+**/.venv/
+
+# Ignore .cache
+.cache/
+**/.cache/
+
+# Ignore misc/bin
+misc/bin/
+
+.mypy_cache/
+__pycache__/
+*.cpython
+
+**/*.avi
+**/*.swp
+**/*.swo
+**/*.swn
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
+
