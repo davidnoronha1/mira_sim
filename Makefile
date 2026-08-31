@@ -1,4 +1,4 @@
-.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell bringup-gz bringup-tacc bringup-sauvc
+.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell exec-gz exec-sitl bringup-gz bringup-tacc bringup-sauvc
 
 export FORCE_COLOR=1
 export RCUTILS_COLORIZED_OUTPUT=1
@@ -168,6 +168,14 @@ shell: $(XAUTH)
 	docker compose up --no-recreate -d $(GZ_SERVICE)
 	docker compose exec $(GZ_SERVICE) bash
 
+exec-gz: $(XAUTH)
+	@echo "🐚 Exec into Gazebo container: $(GZ_SERVICE)"
+	docker compose exec -it $(GZ_SERVICE) /bin/bash
+
+exec-sitl:
+	@echo "🐚 Exec into ArduPilot SITL container"
+	docker compose exec -it ardupilot-sitl /bin/bash
+
 # Raw persistent attach (Ctrl-C stops container without removing it):
 #   docker compose up --no-recreate mira_sim
 # One-off gz in persistent container:
@@ -191,7 +199,7 @@ bringup-gz: check-tmux $(XAUTH)
 		echo "⚠️  tmux session mira-gz already exists. Attach: tmux attach -t mira-gz | Kill: tmux kill-session -t mira-gz"; exit 1; fi
 	@echo "🚀 Bringup GZ (bluerov2_heavy) - tmux session mira-gz [$(GZ_SERVICE)]"
 	tmux new-session -d -s mira-gz -n sitl 'docker compose up --no-recreate ardupilot-sitl; exec bash'
-	tmux new-window -t mira-gz:1 -n bridge 'echo "No bridge required for bluerov2_heavy - ArduPilotPlugin handles FDM over UDP/JSON"; echo "Bridge idle - press Ctrl-C to exit window"; exec bash'
+	tmux new-window -t mira-gz:1 -n bridge 'bash -c "echo Waiting for Gazebo to be ready...; sleep 5; source /opt/ros/jazzy/setup.bash && source install/setup.bash 2>/dev/null || source /opt/ros/jazzy/setup.bash; ros2 run ros_gz_bridge parameter_bridge /realsense/image@sensor_msgs/msg/Image@gz.msgs.Image /realsense/depth_image@sensor_msgs/msg/Image@gz.msgs.Image /realsense/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked /realsense/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo /bottom_cam@sensor_msgs/msg/Image@gz.msgs.Image /side_cam@sensor_msgs/msg/Image@gz.msgs.Image --ros-args -r __ns:=/bluerov2_bridge; exec bash"'
 	tmux new-window -t mira-gz:2 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) gz sim $(GZ_ARGS) bluerov2_heavy_underwater.world; exec bash"'
 	tmux select-window -t mira-gz:0
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-gz; else tmux attach -t mira-gz; fi
@@ -201,7 +209,7 @@ bringup-tacc: check-tmux $(XAUTH)
 		echo "⚠️  tmux session mira-tacc already exists. Attach: tmux attach -t mira-tacc | Kill: tmux kill-session -t mira-tacc"; exit 1; fi
 	@echo "🚀 Bringup TACC - tmux session mira-tacc [$(GZ_SERVICE)]"
 	tmux new-session -d -s mira-tacc -n sitl 'docker compose up --no-recreate ardupilot-sitl; exec bash'
-	tmux new-window -t mira-tacc:1 -n bridge 'echo "No bridge required for TACC - ArduPilotPlugin handles FDM"; echo "Bridge idle"; exec bash'
+	tmux new-window -t mira-tacc:1 -n bridge 'bash -c "echo Waiting for Gazebo to be ready...; sleep 5; source /opt/ros/jazzy/setup.bash && source install/setup.bash 2>/dev/null || source /opt/ros/jazzy/setup.bash; ros2 run ros_gz_bridge parameter_bridge /realsense/image@sensor_msgs/msg/Image@gz.msgs.Image /realsense/depth_image@sensor_msgs/msg/Image@gz.msgs.Image /realsense/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked /realsense/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo /bottom_cam@sensor_msgs/msg/Image@gz.msgs.Image /side_cam@sensor_msgs/msg/Image@gz.msgs.Image --ros-args -r __ns:=/bluerov2_bridge; exec bash"'
 	tmux new-window -t mira-tacc:2 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) gz sim $(GZ_ARGS) /workspace/worlds/tacc.world; exec bash"'
 	tmux select-window -t mira-tacc:0
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-tacc; else tmux attach -t mira-tacc; fi
@@ -395,6 +403,8 @@ help:
 	$(info   simulator-gz      - Run Gazebo with the base BlueROV2 Heavy world)
 	$(info   simulator-tacc-gz - Run Gazebo with the TACC pipeline world)
 	$(info   simulator-sauvc-gz - Run Gazebo with the SAUVC world)
+	$(info   exec-gz           - Interactive bash shell in Gazebo container)
+	$(info   exec-sitl         - Interactive bash shell in SITL container)
 	$(info   bringup-gz        - tmux 3-window bringup (sitl, bridge idle, gazebo bluerov2_heavy))
 	$(info   bringup-tacc      - tmux 3-window bringup (sitl, bridge idle, gazebo tacc.world))
 	$(info   bringup-sauvc     - tmux 3-window bringup (sitl, bridge ros_gz_bridge, gazebo sauvc25.world))
