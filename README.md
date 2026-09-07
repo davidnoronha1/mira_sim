@@ -34,7 +34,7 @@ git submodule update --init --recursive
 make sitl
 
 # Terminal 2: Start Gazebo simulator
-make simulator-gz
+make simulator-tacc-gz
 
 # Terminal 3: Launch QGroundControl on your host
 qgroundcontrol  # or download from qgroundcontrol.com
@@ -45,7 +45,6 @@ qgroundcontrol  # or download from qgroundcontrol.com
 ## Available Worlds
 
 ```bash
-make simulator-gz        # BlueROV2 Heavy (default)
 make simulator-tacc-gz   # TACC pipeline world
 make simulator-sauvc-gz  # SAUVC competition world
 ```
@@ -67,8 +66,8 @@ docker compose build    # Rebuild images locally
 
 Force GPU selection:
 ```bash
-MIRA_GPU=1 make simulator-gz    # Force NVIDIA
-MIRA_GPU=0 make simulator-gz    # Force software rendering
+MIRA_GPU=1 make simulator-tacc-gz    # Force NVIDIA
+MIRA_GPU=0 make simulator-tacc-gz    # Force software rendering
 ```
 
 ## Competition Bringup
@@ -76,12 +75,16 @@ MIRA_GPU=0 make simulator-gz    # Force software rendering
 Tmux sessions with persistent containers:
 
 ```bash
-make bringup-gz      # 3-window session: sitl, bridge, gazebo
 make bringup-tacc    # TACC world
 make bringup-sauvc   # SAUVC world (with ros_gz_bridge)
+make bringdown       # Stop all bringup containers (-t 0)
 
-tmux attach -t mira-gz    # Attach to session
-tmux kill-session -t mira-gz  # Kill session
+# Skip ArduPilot SITL container:
+NO_ARDUPILOT=1 make bringup-tacc
+NO_ARDUPILOT=1 make bringup-sauvc
+
+tmux attach -t mira-tacc    # Attach to session
+tmux kill-session -t mira-tacc  # Kill session
 ```
 
 ## Troubleshooting

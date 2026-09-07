@@ -1,8 +1,15 @@
-.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell bringup-gz bringup-tacc bringup-sauvc
+.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-tacc-gz simulator-sauvc-gz sitl shell bringup-tacc bringup-sauvc bringdown
 
 export FORCE_COLOR=1
 export RCUTILS_COLORIZED_OUTPUT=1
 export RCUTILS_CONSOLE_OUTPUT_FORMAT={severity} {message}
+# docker-compose.yml sets ipc: host on the sim container so X11/Qt can share
+# memory with the host, but that also makes FastDDS try its shared-memory
+# transport for ROS2 between host processes and the container - which does
+# not work across that boundary (nodes on one side can't discover the other
+# at all). Forcing UDP-only here keeps any host-side `ros2 run`/`launch`
+# consistent with the container's matching FASTDDS_BUILTIN_TRANSPORTS.
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 SHELL := /bin/bash
 
 WS := source .venv/bin/activate && source install/setup.bash
@@ -103,11 +110,11 @@ repoversion:
 #   - mira-sim-gpu  if nvidia-smi is present and reports a GPU
 #   - mira_sim      otherwise (iGPU / software / llvmpipe fallback)
 # The same image is used for both; the gpu variant just adds
-# `runtime: nvidia` + GPU reservation. Override with:
-#   make simulator-gz GZ_SERVICE=mira_sim
-#   make simulator-gz GZ_SERVICE=mira-sim-gpu
-#   MIRA_GPU=1 make simulator-gz   (force gpu)
-#   MIRA_GPU=0 make simulator-gz   (force nogpu)
+# Override with:
+#   make simulator-tacc-gz GZ_SERVICE=mira_sim
+#   make simulator-tacc-gz GZ_SERVICE=mira-sim-gpu
+#   MIRA_GPU=1 make simulator-tacc-gz   (force gpu)
+#   MIRA_GPU=0 make simulator-tacc-gz   (force nogpu)
 GZ_ARGS ?= -v3 -r
 XAUTH := /tmp/.docker.xauth
 
@@ -138,22 +145,17 @@ endif
 $(XAUTH): check-x11
 	@true
 
-simulator-gz: $(XAUTH)
-	@echo "🚀 Gazebo service: $(GZ_SERVICE) (MIRA_GPU=$(MIRA_GPU), auto-detect: nvidia-smi)"
-	docker compose up --no-recreate -d $(GZ_SERVICE)
-	docker compose exec $(GZ_SERVICE) gz sim $(GZ_ARGS) bluerov2_heavy_underwater.world
-
 simulator-tacc-gz: $(XAUTH)
 	@echo "🚀 Gazebo service: $(GZ_SERVICE)"
 	docker compose up --no-recreate -d $(GZ_SERVICE)
-	docker compose exec $(GZ_SERVICE) gz sim $(GZ_ARGS) /workspace/worlds/tacc.world
+	docker compose exec $(GZ_SERVICE) bash -c "source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) /workspace/worlds/tacc.world"
 
 simulator-sauvc-gz: $(XAUTH)
 	@echo "🚀 Gazebo service: $(GZ_SERVICE)"
 	docker compose up --no-recreate -d $(GZ_SERVICE)
-	docker compose exec $(GZ_SERVICE) gz sim $(GZ_ARGS) /workspace/sauvc_sim/worlds/sauvc25.world
+	docker compose exec $(GZ_SERVICE) bash -c "source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) /workspace/sauvc_sim/worlds/sauvc25.world"
 
-# All three use `up --no-recreate -d` so the container is persistent:
+# Both use `up --no-recreate -d` so the container is persistent:
 # Ctrl-C stops `gz sim` (the exec) without removing the container; the container
 # itself stays `Up` and is reused on next `make simulator-*` without recreation.
 # `docker compose stop $(GZ_SERVICE)` / `docker compose down` to fully stop/remove.
@@ -175,7 +177,7 @@ shell: $(XAUTH)
 
 # --- Tmux bringup for competitions (persistent containers, X11 auth) ---
 # Each `make bringup-<competition>` spawns a tmux session with 3 windows:
-#   0:sitl   - docker compose up --no-recreate ardupilot-sitl
+#   0:sitl   - docker compose up --no-recreate ardupilot-sitl (skipped if NO_ARDUPILOT=1)
 #   1:bridge - ros_gz_bridge if needed, else idle message
 #   2:gazebo - docker compose exec gz sim <world>
 # All use `up --no-recreate` so containers persist (Ctrl-C stops, not removes).
@@ -186,35 +188,48 @@ ifndef TMUX
 	$(error ❌ tmux not found. Install with: sudo apt install tmux)
 endif
 
-bringup-gz: check-tmux $(XAUTH)
-	@if tmux has-session -t mira-gz 2>/dev/null; then \
-		echo "⚠️  tmux session mira-gz already exists. Attach: tmux attach -t mira-gz | Kill: tmux kill-session -t mira-gz"; exit 1; fi
-	@echo "🚀 Bringup GZ (bluerov2_heavy) - tmux session mira-gz [$(GZ_SERVICE)]"
-	tmux new-session -d -s mira-gz -n sitl 'docker compose up --no-recreate ardupilot-sitl; exec bash'
-	tmux new-window -t mira-gz:1 -n bridge 'echo "No bridge required for bluerov2_heavy - ArduPilotPlugin handles FDM over UDP/JSON"; echo "Bridge idle - press Ctrl-C to exit window"; exec bash'
-	tmux new-window -t mira-gz:2 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) gz sim $(GZ_ARGS) bluerov2_heavy_underwater.world; exec bash"'
-	tmux select-window -t mira-gz:0
-	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-gz; else tmux attach -t mira-gz; fi
+NO_ARDUPILOT ?= 0
+ifeq ($(NO_ARDUPILOT),1)
+  SITL_CMD := echo "ArduPilot SITL disabled (NO_ARDUPILOT=1)"; exec bash
+else
+  SITL_CMD := docker compose up --no-recreate ardupilot-sitl; exec bash
+endif
 
 bringup-tacc: check-tmux $(XAUTH)
 	@if tmux has-session -t mira-tacc 2>/dev/null; then \
 		echo "⚠️  tmux session mira-tacc already exists. Attach: tmux attach -t mira-tacc | Kill: tmux kill-session -t mira-tacc"; exit 1; fi
-	@echo "🚀 Bringup TACC - tmux session mira-tacc [$(GZ_SERVICE)]"
-	tmux new-session -d -s mira-tacc -n sitl 'docker compose up --no-recreate ardupilot-sitl; exec bash'
+	@echo "🚀 Bringup TACC - tmux session mira-tacc [$(GZ_SERVICE)]$(if $(filter 1,$(NO_ARDUPILOT)), [NO_ARDUPILOT=1],)"
+	tmux new-session -d -s mira-tacc -n sitl '$(SITL_CMD)'
 	tmux new-window -t mira-tacc:1 -n bridge 'echo "No bridge required for TACC - ArduPilotPlugin handles FDM"; echo "Bridge idle"; exec bash'
-	tmux new-window -t mira-tacc:2 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) gz sim $(GZ_ARGS) /workspace/worlds/tacc.world; exec bash"'
+	tmux new-window -t mira-tacc:2 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash -c \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) /workspace/worlds/tacc.world\"; exec bash"'
 	tmux select-window -t mira-tacc:0
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-tacc; else tmux attach -t mira-tacc; fi
 
 bringup-sauvc: check-tmux $(XAUTH)
 	@if tmux has-session -t mira-sauvc 2>/dev/null; then \
 		echo "⚠️  tmux session mira-sauvc already exists. Attach: tmux attach -t mira-sauvc | Kill: tmux kill-session -t mira-sauvc"; exit 1; fi
-	@echo "🚀 Bringup SAUVC - tmux session mira-sauvc [$(GZ_SERVICE)]"
-	tmux new-session -d -s mira-sauvc -n sitl 'docker compose up --no-recreate ardupilot-sitl; exec bash'
-	tmux new-window -t mira-sauvc:1 -n bridge 'bash -c "echo Waiting for Gazebo to be ready...; sleep 5; source /opt/ros/jazzy/setup.bash && source install/setup.bash 2>/dev/null || source /opt/ros/jazzy/setup.bash; ros2 run ros_gz_bridge parameter_bridge /cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist /front_camera/left/image_raw@sensor_msgs/msg/Image@gz.msgs.Image /front_camera/right/image_raw@sensor_msgs/msg/Image@gz.msgs.Image /sim/front_camera/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked /bottom_camera@sensor_msgs/msg/Image@gz.msgs.Image /side_cam@sensor_msgs/msg/Image@gz.msgs.Image /world/pool_world/create@ros_gz_interfaces/srv/SpawnEntity --ros-args -r __ns:=/sauvc_bridge; exec bash"'
-	tmux new-window -t mira-sauvc:2 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) gz sim $(GZ_ARGS) /workspace/sauvc_sim/worlds/sauvc25.world; exec bash"'
+	@echo "🚀 Bringup SAUVC - tmux session mira-sauvc [$(GZ_SERVICE)]$(if $(filter 1,$(NO_ARDUPILOT)), [NO_ARDUPILOT=1],)"
+	tmux new-session -d -s mira-sauvc -n sitl '$(SITL_CMD)'
+	
+	# Bridge runs INSIDE the mira_sim container (not on the host): ROS2/gz-transport
+	# discovery between host processes and this container's processes does not
+	# work even with network_mode:host + ipc:host (confirmed with a plain,
+	# Gazebo-free std_msgs/String pub/sub test - not a topic-name/DDS-config
+	# mismatch, some deeper participant/port issue on the shared network stack).
+	# A bridge co-located with gzserver reliably receives and republishes camera
+	# data; the same bridge run on the host never received a single frame.
+	tmux new-window -t mira-sauvc:1 -n bridge 'bash -c "echo Waiting for Gazebo to be ready...; sleep 5; docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash -c \"source /opt/ros/jazzy/setup.bash && exec ros2 run ros_gz_bridge parameter_bridge /cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist /front_camera/left/image_raw@sensor_msgs/msg/Image@gz.msgs.Image /front_camera/right/image_raw@sensor_msgs/msg/Image@gz.msgs.Image /sim/front_camera/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked /bottom_camera@sensor_msgs/msg/Image@gz.msgs.Image /side_cam@sensor_msgs/msg/Image@gz.msgs.Image /world/pool_world/create@ros_gz_interfaces/srv/SpawnEntity --ros-args -r __ns:=/sauvc_bridge\"; exec bash"'
+	tmux new-window -t mira-sauvc:2 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash -c \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) /workspace/sauvc_sim/worlds/sauvc25.world\"; exec bash"'
 	tmux select-window -t mira-sauvc:0
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-sauvc; else tmux attach -t mira-sauvc; fi
+
+bringdown:
+	@echo "🛑 Stopping bringup containers..."
+	docker compose stop -t 0
+	@echo "🛑 Exiting tmux bringup sessions..."
+	@tmux kill-session -t mira-sauvc 2>/dev/null || true
+	@tmux kill-session -t mira-tacc 2>/dev/null || true
+	@tmux kill-session -t mira-gz 2>/dev/null || true
 
 
 changed:
@@ -392,12 +407,12 @@ help:
 	$(info )
 	$(info Simulator targets (Dockerized, no host ROS needed):)
 	$(info   sitl              - Run ArduSub SITL)
-	$(info   simulator-gz      - Run Gazebo with the base BlueROV2 Heavy world)
 	$(info   simulator-tacc-gz - Run Gazebo with the TACC pipeline world)
 	$(info   simulator-sauvc-gz - Run Gazebo with the SAUVC world)
-	$(info   bringup-gz        - tmux 3-window bringup (sitl, bridge idle, gazebo bluerov2_heavy))
 	$(info   bringup-tacc      - tmux 3-window bringup (sitl, bridge idle, gazebo tacc.world))
 	$(info   bringup-sauvc     - tmux 3-window bringup (sitl, bridge ros_gz_bridge, gazebo sauvc25.world))
+	$(info   bringdown         - Stop all bringup containers (-t 0))
+	$(info     Flags: NO_ARDUPILOT=1 (skip SITL))
 	$(info     Attach: tmux attach -t mira-<comp>  Detach: Ctrl-b d  Kill: tmux kill-session -t mira-<comp>)
 	$(info )
 	$(info Dashboard applications:)

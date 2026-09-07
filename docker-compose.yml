@@ -68,10 +68,11 @@ services:
       dockerfile: docker/gazebo.Dockerfile
     platform: linux/amd64
     container_name: mira_sim
+    user: "${UID:-1000}:${GID:-1000}"
     stdin_open: true
     tty: true
     network_mode: host
-    ipc: host
+    # ipc: host
     # Higher CPU priority - Gazebo + ArduPilot plugin are both CPU-heavy
     cpu_shares: 2048
     cpus: 6
@@ -86,19 +87,44 @@ services:
       # with this project's own worlds/ and common_resources/sauvc_sim assets
       # (bind-mounted below) so no colcon/ROS build is needed to use them.
       - GZ_SIM_SYSTEM_PLUGIN_PATH=/workspace/ardupilot_gazebo/build
-      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds
+      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
       # Also baked into the image (see docker/gazebo.Dockerfile), but
       # re-declared here so an already-running container from an older image
       # picks it up without a rebuild. Without it, `gz` doesn't register
       # "sim" as a command at all (see docker/gazebo.Dockerfile comment).
-      - GZ_CONFIG_PATH=/usr/share/gz:/opt/ros/jazzy/opt/gz_sim_vendor/share/gz
+      - GZ_CONFIG_PATH=/usr/share/gz:/opt/ros/jazzy/opt/gz_sim_vendor/share/gz:/opt/ros/jazzy/opt/gz_transport_vendor/share/gz
+      # ipc: host (below) shares /dev/shm with the host, which makes FastDDS
+      # think it can use its shared-memory transport for ROS2 discovery/data
+      # between host processes and this container - but that SHM transport
+      # does not actually work across the container boundary (nodes on one
+      # side can't see nodes on the other at all, verified with a plain
+      # std_msgs/String pub/sub - not a topic-name/QoS/domain-id mismatch).
+      # Forcing UDP-only transport fixes it immediately. Must match on the
+      # host side too (see Makefile's `export FASTDDS_BUILTIN_TRANSPORTS`).
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
     volumes:
+      - /dev/shm:/dev/shm
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /tmp/.docker.xauth:/tmp/.docker.xauth:ro
       - ./docker/gazebo-entrypoint.sh:/entrypoint.sh:ro
       - ./worlds:/workspace/worlds:ro
+      - ./src/bluerov2_gz:/workspace/bluerov2_gz:ro
       - ./src/common_resources/data/object_files:/workspace/common_resources:ro
       - ./src/sauvc_sim:/workspace/sauvc_sim:ro
+      - ./src/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/models:ro
+      - ./src/ardupilot_gazebo/worlds:/workspace/ardupilot_gazebo/worlds:ro
+    # Intel/AMD iGPU passthrough (`devices: - /dev/dri:/dev/dri`) was tried
+    # here for hardware-accelerated rendering (mira-sim-gpu above covers the
+    # NVIDIA case via runtime: nvidia) but is currently REVERTED: on this
+    # host (Intel Meteor Lake iGPU), enabling it made gz-sim's camera/RGBD
+    # sensors publish zero frames - even though `glxinfo`/`eglinfo` inside
+    # the container both confirm direct rendering + the iris driver work
+    # fine standalone. The failure is specific to gz-sim's Ogre2 engine
+    # context setup (GUI's GLX context + Sensors' offscreen context both
+    # sharing one render engine instance) and wasn't root-caused. Software
+    # rendering (the gazebo-entrypoint.sh fallback, ~1-3Hz on this host) is
+    # the verified-working baseline - re-add the devices: entry above only
+    # after actually confirming camera topics publish with it on your host.
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
     command: ["bash"]
 
@@ -118,7 +144,7 @@ services:
     container_name: mira-sim-gpu
     image: ghcr.io/davidnoronha1/mira_sim-gazebo:${MIRA_SIM_TAG:-latest}
     runtime: nvidia
-    ipc: host
+    # ipc: host
     cpu_shares: 2048
     cpus: 6
     oom_score_adj: -500
@@ -127,11 +153,15 @@ services:
       - XAUTHORITY=/tmp/.docker.xauth
       - QT_X11_NO_MITSHM=1
       - GZ_SIM_SYSTEM_PLUGIN_PATH=/workspace/ardupilot_gazebo/build
-      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds
-      - GZ_CONFIG_PATH=/usr/share/gz:/opt/ros/jazzy/opt/gz_sim_vendor/share/gz
+      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
+      - GZ_CONFIG_PATH=/usr/share/gz:/opt/ros/jazzy/opt/gz_sim_vendor/share/gz:/opt/ros/jazzy/opt/gz_transport_vendor/share/gz
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - GZ_RENDER_ENGINE=ogre2
+      # See the matching comment on mira_sim above: ipc: host breaks ROS2
+      # DDS discovery across the host/container boundary via FastDDS's SHM
+      # transport; force UDP-only.
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
     deploy:
       resources:
         reservations:

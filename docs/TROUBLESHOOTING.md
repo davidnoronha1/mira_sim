@@ -14,7 +14,7 @@ If empty, you're likely connecting via SSH without X11 forwarding.
 ```bash
 ssh -X user@host  # Enable X11 forwarding
 # Then retry
-make simulator-gz
+make simulator-tacc-gz
 ```
 
 **Check 2: xauth cookie missing**
@@ -136,7 +136,7 @@ If you see:
 
 **Fix: Enable GPU**
 ```bash
-MIRA_GPU=1 make simulator-gz
+MIRA_GPU=1 make simulator-tacc-gz
 ```
 
 Requires NVIDIA GPU + NVIDIA Container Toolkit.
@@ -263,7 +263,7 @@ If empty or wrong:
 DISPLAY=:0 docker compose up --no-recreate -d mira_sim
 # Or export it in your shell:
 export DISPLAY=:0
-make simulator-gz
+make simulator-tacc-gz
 ```
 
 ### Symptom: GPU not auto-detected
@@ -278,7 +278,7 @@ docker compose logs mira_sim | head -5
 
 If using `mira_sim` but you have a GPU:
 ```bash
-MIRA_GPU=1 make simulator-gz
+MIRA_GPU=1 make simulator-tacc-gz
 ```
 
 ---
