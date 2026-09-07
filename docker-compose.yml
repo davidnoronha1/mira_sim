@@ -111,6 +111,7 @@ services:
       - ./src/bluerov2_gz:/workspace/bluerov2_gz:ro
       - ./src/common_resources/data/object_files:/workspace/common_resources:ro
       - ./src/sauvc_sim:/workspace/sauvc_sim:ro
+      - ./src/bridge:/workspace/bridge:ro
       - ./src/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/models:ro
       - ./src/ardupilot_gazebo/worlds:/workspace/ardupilot_gazebo/worlds:ro
     # Intel/AMD iGPU passthrough (`devices: - /dev/dri:/dev/dri`) was tried

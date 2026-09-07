@@ -26,6 +26,9 @@ RUN apt-get update \
     libgz-sim8-dev \
     rapidjson-dev \
     libopencv-dev \
+    python3-opencv \
+    python3-numpy \
+    python3-pil \
     libgstreamer1.0-dev \
     libgstreamer-plugins-base1.0-dev \
     gstreamer1.0-plugins-bad \
