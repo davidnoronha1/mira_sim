@@ -9,7 +9,7 @@ XAUTH=/tmp/.docker.xauth
 # Always (re)generate when DISPLAY is set - stale cookies after VT switch /
 # display-manager restart cause "Invalid MIT-MAGIC-COOKIE-1". Remove stale file first.
 if [ -n "${DISPLAY:-}" ] && command -v xauth >/dev/null 2>&1; then
-  rm -f "$XAUTH"
+  rm -rf "$XAUTH"
   # ffff fix converts the FamilyLocal (0x0100) to FamilyWild (0xffff) so the
   # cookie is accepted inside the container's network namespace (harmless with host mode).
   if xauth_list=$(xauth nlist "$DISPLAY" 2>/dev/null | sed -e 's/^..../ffff/'); then

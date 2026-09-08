@@ -181,9 +181,9 @@ class UnderwaterCamera(Node):
     def __init__(self) -> None:
         super().__init__('underwater_camera')
 
-        self.declare_parameter('input_image_topic', 'color/image_raw_dry')
-        self.declare_parameter('input_depth_topic', 'depth/image_raw')
-        self.declare_parameter('output_image_topic', 'color/image_raw')
+        self.declare_parameter('input_image_topic', '/camera_front/image_raw_dry')
+        self.declare_parameter('input_depth_topic', '/camera_front/depth/image_raw')
+        self.declare_parameter('output_image_topic', '/camera_front/image_raw')
 
         self.declare_parameter('beta', list(DEFAULT_BETA))
         self.declare_parameter('veiling_colour', list(DEFAULT_VEILING))
@@ -222,34 +222,25 @@ class UnderwaterCamera(Node):
             self.create_timer(period, self._roll_water)
             self.get_logger().info(f'Domain randomisation on, re-rolling every {period:.0f}s')
 
-        # Reliable, depth 1 — not qos_profile_sensor_data.
-        #
-        # A best-effort *publisher* cannot be matched by a reliable subscriber,
-        # and web_video_server subscribes reliably with no way to override it
-        # (its only QoS parameters are for parameter_events). The result was a
-        # camera stream that opened, sent the multipart boundary, and then
-        # delivered nothing at all — for the front camera only, because every
-        # other image publisher in the stack is already reliable.
-        #
-        # Nothing is lost by offering the stronger policy: a reliable offer
-        # still satisfies best-effort subscribers, which is how the perception
-        # pipeline reads this topic, and KEEP_LAST depth 1 keeps overwriting
-        # rather than queueing, so a slow consumer still just misses frames.
+        out_topic = self.get_parameter('output_image_topic').value
+
         self.publisher = self.create_publisher(
-            Image, self.get_parameter('output_image_topic').value,
+            Image, out_topic,
             QoSProfile(depth=1,
                        reliability=ReliabilityPolicy.RELIABLE,
                        history=HistoryPolicy.KEEP_LAST))
+
+        in_img = self.get_parameter('input_image_topic').value
+        in_depth = self.get_parameter('input_depth_topic').value
         self.create_subscription(
-            Image, self.get_parameter('input_depth_topic').value,
+            Image, in_depth,
             self._on_depth, qos_profile_sensor_data)
         self.create_subscription(
-            Image, self.get_parameter('input_image_topic').value,
+            Image, in_img,
             self._on_image, qos_profile_sensor_data)
 
         self.get_logger().info(
-            f'Underwater camera: {self.get_parameter("input_image_topic").value} '
-            f'-> {self.get_parameter("output_image_topic").value}  '
+            f'Underwater camera: {in_img} -> {out_topic}  '
             f'beta={np.round(self.water.beta, 3).tolist()}')
 
     def _roll_water(self) -> None:
