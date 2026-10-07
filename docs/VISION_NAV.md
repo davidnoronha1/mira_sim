@@ -56,6 +56,23 @@ Gazebo world frame: goals and waypoint files use plain pool coordinates.
 - From a terminal (the tmux `shell` window), with a chosen depth (z < 0):
   `ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped "{header: {frame_id: odom}, pose: {position: {x: 6, y: -6, z: -1.5}, orientation: {w: 1}}}"`
 
+## Recording a demo video
+
+`make record-demo` records the click-to-go flow to
+`recordings/vision_nav_demo.mp4`: the Gazebo GUI (left) and RViz (right) side
+by side, a real "2D Goal Pose" mouse drag in RViz, and ArduSub flying there
+around obstacles. It runs everything on a private Xvfb display (headless is
+fine) and replaces `bringup-vision`, so `make bringdown` first.
+
+- Host needs `Xvfb`, `xdotool`, `x11-utils` and `ffmpeg`.
+- Default goal: just short of the SAUVC gate, straight through the orange
+  flare, so the planner has to bend around it. Change it with
+  `GOAL="x y heading_deg"` (Gazebo world coordinates).
+- `SPEEDUP=2` speeds the video up (useful with software rendering, where the
+  sim runs at ~0.3x real time); `VISION_SOURCE`, `VISION_DEPTH` as above.
+- Layouts: `record_gui.config` (Gazebo) and `record.rviz` (top-down RViz view,
+  which the script uses to turn the goal into a mouse position).
+
 ## Object avoidance (ArduPilot-native)
 
 Goals are not flown in a straight line any more: ArduSub's own object
