@@ -3,6 +3,11 @@
 # velocity come from MAVLink ODOMETRY sent by src/vision_nav/vision_bridge.py.
 # Depth stays on the baro (ArduSub's pressure sensor), heading on the compass
 # (vision_bridge aligns the VO frame to it at startup).
+# The ardupilot_gazebo plugin sends no_time_sync=true, which makes SITL
+# default AHRS_EKF_TYPE to 10 (simulator ground truth, no EKF - external nav
+# would be silently ignored). The model runs lock_step, so EKF3 is safe.
+AHRS_EKF_TYPE    3
+EK3_ENABLE       1
 GPS1_TYPE        0
 SIM_GPS1_ENABLE  0
 VISO_TYPE        1
@@ -13,3 +18,10 @@ EK3_SRC1_VELXY   6
 EK3_SRC1_POSZ    1
 EK3_SRC1_VELZ    0
 EK3_SRC1_YAW     1
+# Without GPS, auto-declination only kicks in once vision_bridge sets the EKF
+# origin - after the heading has already initialised - so the EKF yaw then
+# slowly swings ~4.7 deg and drifts away from the VO frame aligned at
+# startup. Pin the declination for the fixed --custom-location instead
+# (value is what COMPASS_AUTODEC computes for 63.52N 10.35E).
+COMPASS_AUTODEC  0
+COMPASS_DEC      0.082045

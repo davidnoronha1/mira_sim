@@ -19,7 +19,7 @@ gz OdometryPublisher ───────► /vision/gt_odom        vo.sh (rtab
 
 | File | Role |
 |---|---|
-| `docker/ardusub_vision.parm` | GPS off, `VISO_TYPE=1`, EKF3 XY pos/vel from ExtNav, Z from baro, yaw from compass |
+| `docker/ardusub_vision.parm` | EKF3 on, GPS off, `VISO_TYPE=1`, XY pos/vel from ExtNav, Z from baro, yaw from compass, declination pinned |
 | `ardupilot-sitl-vision` (compose) | SITL with the overlay above; own `./ardupilot_vision` data dir so params don't leak into the normal SITL |
 | `src/vision_nav/bridge.sh` | ros_gz_bridge for camera + GT odometry + `/clock`, static TF `base_link → front_camera_depth_optical` |
 | `src/vision_nav/vo.sh` | `rtabmap_odom rgbd_odometry`; extra args are passed through (e.g. `-p Reg/Strategy:="'1'"`) |
@@ -37,10 +37,36 @@ The `bluerov2_heavy` model (bluerov2_gz fork) carries the
 - `vo`: rtabmap's odom frame is FLU anchored at the start pose, so its FRD is
   treated as "NED with north = initial heading".
 - For both, the first sample is rotated about the vertical so its heading
-  matches ArduSub's AHRS yaw (logged as `Aligned ... rotate N deg`). For `gt`
-  that number should be ~0 (or the magnetic declination); anything large
-  means a frame bug.
+  matches ArduSub's AHRS yaw (logged as `Aligned ... rotate N deg`), once
+  that yaw has been steady for 3 s (the EKF reports yaw 0 for a moment while
+  it initialises). For `gt` the rotation should be ~0; anything large means a
+  frame bug. For `vo` it equals the vehicle's true heading at startup.
 - The EKF origin is the spawn point, so waypoints are metres from spawn.
+
+## ArduSub gotchas (both handled in `ardusub_vision.parm`)
+
+- **`AHRS_EKF_TYPE` is 10 by default here.** The ardupilot_gazebo plugin sends
+  `no_time_sync=true`, and SITL reacts by defaulting to simulator ground-truth
+  attitude/position (type 10). External nav is then silently ignored:
+  `EKF_STATUS_REPORT` variances read exactly 0. The overlay forces EKF3
+  (`AHRS_EKF_TYPE 3`), which is safe because the model runs `lock_step`.
+- **Declination.** Without GPS, `COMPASS_AUTODEC` only applies once the EKF has
+  a location, i.e. after vision_bridge sets the origin, which is after the
+  heading initialised. The EKF yaw then swings by the declination (4.7° here)
+  over a few minutes and drifts away from the aligned VO frame. The overlay pins
+  `COMPASS_DEC` for the compose `--custom-location` and disables autodec.
+  If you change the location, read the new value: let autodec run once, then
+  `param show COMPASS_DEC`.
+
+## Verified results (2026-10-07, RTX PRO 6000, tacc.world, `tacc_square`)
+
+| | Ground truth source | VO source |
+|---|---|---|
+| Waypoints reached | 6/6 | 6/6 |
+| Final position error (Gazebo truth) | ~2 cm | ~13 cm |
+| Max VO xy error vs truth during flight | 9 cm (VO logged only) | 34 cm |
+| VO lost frames | 0 | 0 (plus 1 at startup, by design) |
+| VO rate / latency | 30 Hz / ~26 ms | 30 Hz / ~26 ms |
 
 ## Bring-up checklist
 
@@ -60,8 +86,12 @@ The `bluerov2_heavy` model (bluerov2_gz fork) carries the
   says `ogre`). Use the `mira-sim-gpu` service (`MIRA_GPU=1`).
 - **rtabmap "Did not receive data"**: check the image frame with
   `ros2 topic echo --once /vision/camera_info --field header`. It should be
-  `front_camera_depth_optical`. If not, `gz_frame_id` wasn't picked up; change
-  the child frame in `bridge.sh` to whatever the header says.
+  `front_camera_depth_optical`. Gazebo logs a harmless "gz_frame_id ... not
+  defined in SDF" warning (the model file is SDF 1.6) but still applies it.
+- **EKF variances all exactly 0 / vision ignored**: `AHRS_EKF_TYPE` is not 3,
+  see the gotchas above.
+- **`mavproxy.py: No such file or directory` in the SITL container**: the
+  compose `PATH` must include `/opt/mavenv/bin` (fixed in docker-compose.yml).
 - **`dropped` counts rising / "lost tracking"**: VO lost its features (open
   water, flat seafloor). Try, in order:
   - Pitch the depth camera down 20–30° in `model.sdf`, and update the static
@@ -77,7 +107,9 @@ The `bluerov2_heavy` model (bluerov2_gz fork) carries the
   - Check params in the SITL console: `param show EK3_SRC1*`, `param show VISO*`.
   - Stale params: delete `./ardupilot_vision/eeprom.bin` to re-apply the overlay.
 - **Yaw drifts against VO**: heading comes from the compass, VO position from
-  the camera. If the EKF fights, try `EK3_SRC1_YAW 6` (ExtNav yaw), and run
-  `vision_bridge.py --no-align`, since alignment to the AHRS is then circular.
+  the camera. Check that `COMPASS_DEC` matches the location (see above). As a
+  fallback, `EK3_SRC1_YAW 6` (ExtNav yaw) with `vision_bridge.py --no-align`
+  keeps the frames consistent by construction, but then "north" is the
+  vehicle's initial heading rather than true north.
 - **Tuning**: `VISO_POS_M_NSE`, `VISO_VEL_M_NSE`, `VISO_YAW_M_NSE` (EKF trust
   in the vision data), `VISO_DELAY_MS` (camera-to-pose latency).

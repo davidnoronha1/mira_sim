@@ -19,6 +19,7 @@ On startup the EKF origin is set via SET_GPS_GLOBAL_ORIGIN (there is no GPS
 to set it), matching --custom-location in docker-compose.yml.
 """
 import argparse
+import collections
 import math
 import os
 import threading
@@ -42,6 +43,11 @@ ENU_TO_NED = np.array([[0.0, 1.0, 0.0],
 # VO odom frame is FLU at the start pose; treat its FRD as "NED with north
 # = initial heading" and let the yaw alignment rotate it onto true NED.
 SRC_TO_NED = {'gt': ENU_TO_NED, 'vo': FLU_TO_FRD}
+
+# AHRS heading must stay within YAW_SETTLE_DEG for YAW_SETTLE_S before the
+# source frame is aligned to it
+YAW_SETTLE_S = 3.0
+YAW_SETTLE_DEG = 0.5
 
 # rtabmap publishes covariance 9999 when it has lost tracking
 LOST_COVARIANCE = 1000.0
@@ -89,7 +95,8 @@ class VisionBridge(Node):
         self.args = args
         self.src_to_ned = SRC_TO_NED[args.source]
         self.align = None  # rotation about NED down, latched on first sample
-        self.ahrs_yaw = None
+        self.ahrs_yaw = None  # settled AHRS yaw, see _on_attitude
+        self.yaw_history = collections.deque()
         self.origin_set = False
         self.sent = 0
         self.dropped = 0
@@ -112,15 +119,37 @@ class VisionBridge(Node):
             if msg is None:
                 continue
             if msg.get_type() == 'ATTITUDE':
-                self.ahrs_yaw = msg.yaw
-            elif not self.origin_set:
-                self.origin_set = True
-                self.get_logger().info(
-                    f'EKF origin set: {msg.latitude / 1e7:.6f}, {msg.longitude / 1e7:.6f}')
+                self._on_attitude(msg.yaw)
+            else:
+                if not self.origin_set:
+                    self.get_logger().info(
+                        f'EKF origin set: {msg.latitude / 1e7:.6f}, {msg.longitude / 1e7:.6f}')
+                self.origin_set = time.monotonic()
+
+    def _on_attitude(self, yaw):
+        # The EKF heading keeps converging for a while after boot, so only
+        # expose it for alignment once it has held still for YAW_SETTLE_S.
+        now = time.monotonic()
+        self.yaw_history.append((now, yaw))
+        while self.yaw_history[0][0] < now - YAW_SETTLE_S:
+            self.yaw_history.popleft()
+        span = self.yaw_history[-1][0] - self.yaw_history[0][0]
+        ref = self.yaw_history[0][1]
+        spread = max(abs(wrap_pi(y - ref)) for _, y in self.yaw_history)
+        if span >= YAW_SETTLE_S * 0.9 and spread < math.radians(YAW_SETTLE_DEG):
+            self.ahrs_yaw = yaw
 
     def _housekeeping(self):
         self.mav.mav.heartbeat_send(
             mavutil.mavlink.MAV_TYPE_ONBOARD_CONTROLLER, mavutil.mavlink.MAV_AUTOPILOT_INVALID, 0, 0, 0)
+        # Poll the origin so a rebooted autopilot (origin lost) gets it again
+        self.mav.mav.command_long_send(
+            self.mav.target_system, self.mav.target_component,
+            mavutil.mavlink.MAV_CMD_REQUEST_MESSAGE, 0,
+            mavutil.mavlink.MAVLINK_MSG_ID_GPS_GLOBAL_ORIGIN, 0, 0, 0, 0, 0, 0)
+        if self.origin_set and time.monotonic() - self.origin_set > 5.0:
+            self.get_logger().warn('EKF origin no longer reported (autopilot rebooted?), re-sending')
+            self.origin_set = False
         if not self.origin_set:
             self.mav.mav.set_gps_global_origin_send(
                 self.mav.target_system,
@@ -145,7 +174,8 @@ class VisionBridge(Node):
             if self.args.no_align:
                 self.align = np.eye(3)
             elif self.ahrs_yaw is None:
-                self.get_logger().warn('No ATTITUDE from ArduSub yet, holding off', throttle_duration_sec=5.0)
+                self.get_logger().warn('Waiting for AHRS heading to settle before aligning',
+                                       throttle_duration_sec=5.0)
                 return
             else:
                 src_yaw = math.atan2(r_ned_frd[1, 0], r_ned_frd[0, 0])
