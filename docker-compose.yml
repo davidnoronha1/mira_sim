@@ -17,7 +17,8 @@ services:
     environment:
       - VEHICLE=ArduSub
       - MODEL=vectored
-      - PATH=/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      # /opt/mavenv/bin: MAVProxy venv (see docker/ardupilot.Dockerfile)
+      - PATH=/opt/mavenv/bin:/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - ./ardupilot:/ardupilot_data
       - ./docker/ardusub_frame_config.parm:/ardusub_frame_config.parm:ro
