@@ -25,21 +25,35 @@ from the physics over the SITL JSON link, as on a real vehicle. GPS is off.
 `VISION_SOURCE=gt` swaps the truth in, but only for debugging the
 ArduPilot/GUIDED side.
 
+## Maps
+
+`make bringup-vision` uses the SAUVC pool by default (`VISION_MAP=sauvc`,
+`sauvc25.world`, AUV starts in the starting zone at x=11, y=-11.5 facing
+north). `VISION_MAP=tacc` selects the TACC pipeline world (start at the origin).
+
+VO starts at zero wherever the AUV starts, so vision_bridge shifts it by the
+map's known start position (`--start-enu`). ArduSub's local frame is then the
+Gazebo world frame: goals and waypoint files use plain pool coordinates.
+
 ## Click-to-go in RViz
 
 `make bringup-vision` opens RViz with `vision_nav.rviz`:
 
-- **Green**: Gazebo truth (path + arrow). **Red**: what ArduSub's EKF believes
-  (path + arrow), which is what it steers by. Their gap is the VO error.
+- **World objects** (gates, mat, starting zone, pool walls/floor, water
+  surface) are drawn from the world SDF by `scene_markers.py`, with labels.
+  Objects that are commented out in the world file don't appear in either view.
+- **AUV**: solid = where ArduSub's EKF thinks it is (what it steers by),
+  translucent green = Gazebo truth. Paths: red = EKF, green = truth.
 - **2D Goal Pose** (toolbar): click a spot and drag for heading. `goal_bridge.py`
   switches ArduSub to GUIDED, arms it, and flies there at `VISION_DEPTH`
   (default 1 m; e.g. `make bringup-vision VISION_DEPTH=2`).
-- Grid = surface plane, 1 m cells. Frame `odom` is Gazebo's world: x = east,
-  y = north, origin = spawn.
-- From a terminal, with a chosen depth (z < 0 = depth):
-  `ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped "{header: {frame_id: odom}, pose: {position: {x: 2, y: 3, z: -1.5}, orientation: {w: 1}}}"`
-
-The Gazebo GUI still works for watching the vehicle, but it can't send goals.
+- **The goal is also highlighted in the Gazebo GUI**: magenta sphere at the
+  goal, a pole up to the surface, a heading line and a "GOAL" label. These are
+  GUI-only markers, so the simulated camera (and VO) can't see them.
+- Grid = water surface, 1 m cells. Frame `odom` = Gazebo world: x = east,
+  y = north.
+- From a terminal (the tmux `shell` window), with a chosen depth (z < 0):
+  `ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped "{header: {frame_id: odom}, pose: {position: {x: 6, y: -6, z: -1.5}, orientation: {w: 1}}}"`
 
 ## Pieces
 
@@ -53,6 +67,7 @@ The Gazebo GUI still works for watching the vehicle, but it can't send goals.
 | `src/vision_nav/waypoints.py` | waits for EKF position, GUIDED, arm, flies a YAML waypoint list |
 | `src/vision_nav/compare_odom.py` | prints VO error vs ground truth once per second |
 | `src/vision_nav/goal_bridge.py` | RViz `/goal_pose` → GUIDED target; publishes EKF pose/path and truth path for RViz (MAVLink udp 14557) |
+| `src/vision_nav/scene_markers.py` | world SDF → RViz markers (`/vision/scene`); AUV mesh at EKF and truth poses (`/vision/auv`) |
 | `src/vision_nav/vision_nav.rviz` | RViz layout: truth vs EKF, goal, camera image, 2D Goal Pose tool |
 
 The `bluerov2_heavy` model (bluerov2_gz fork) carries the
@@ -98,6 +113,14 @@ The `bluerov2_heavy` model (bluerov2_gz fork) carries the
 
 RViz-style goal (2 m east, 3 m north, heading north) on VO only: reached
 within 6 cm of the target by Gazebo truth, heading 358°.
+
+SAUVC pool, VO only: about 165-240 inliers per frame (the pool is visually plainer
+than TACC; the lane-line floor texture carries it), no lost frames. A ~28 m
+run across the pool ended 1.7 m from the goal by Gazebo truth while the EKF
+believed it was 0.27 m away, i.e. ~5% drift over distance. Short hops are
+accurate; long open-water legs drift. To reduce that, try
+`vo.sh -p Reg/Strategy:="'2'"` (visual + depth ICP), or pitch the camera
+down so more of the floor texture is in view.
 
 ## Bring-up checklist
 

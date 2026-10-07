@@ -15,6 +15,12 @@ current AHRS yaw (compass), so a VO frame anchored at "whatever way the
 vehicle was facing" lines up with NED and waypoints mean the same thing for
 both sources.
 
+VO starts at zero wherever the vehicle starts, so it is shifted by the known
+start position (--start-enu, Gazebo world x/y = east/north, i.e. "the
+vehicle starts in the starting zone"). That makes ArduSub's local NED frame
+the Gazebo world frame for both sources: goals and waypoints are plain world
+coordinates. Ground truth is already in world coordinates.
+
 On startup the EKF origin is set via SET_GPS_GLOBAL_ORIGIN (there is no GPS
 to set it), matching --custom-location in docker-compose.yml.
 """
@@ -94,6 +100,8 @@ class VisionBridge(Node):
         super().__init__('vision_bridge')
         self.args = args
         self.src_to_ned = SRC_TO_NED[args.source]
+        east, north = args.start_enu if args.source == 'vo' else (0.0, 0.0)
+        self.offset_ned = np.array([north, east, 0.0])
         self.align = None  # rotation about NED down, latched on first sample
         self.ahrs_yaw = None  # settled AHRS yaw, see _on_attitude
         self.yaw_history = collections.deque()
@@ -184,7 +192,7 @@ class VisionBridge(Node):
                 self.get_logger().info(
                     f'Aligned {self.args.source} heading to AHRS: rotate {math.degrees(delta):+.1f} deg')
 
-        pos = self.align @ self.src_to_ned @ np.array([p.x, p.y, p.z])
+        pos = self.align @ self.src_to_ned @ np.array([p.x, p.y, p.z]) + self.offset_ned
         r_ned_frd = self.align @ r_ned_frd
 
         lin, ang = msg.twist.twist.linear, msg.twist.twist.angular
@@ -215,6 +223,8 @@ def main():
     ap.add_argument('--origin-lat', type=float, default=63.52)
     ap.add_argument('--origin-lon', type=float, default=10.35)
     ap.add_argument('--origin-alt', type=float, default=0.0)
+    ap.add_argument('--start-enu', type=float, nargs=2, default=(0.0, 0.0), metavar=('X', 'Y'),
+                    help='vehicle start position in Gazebo world coordinates (vo source only)')
     ap.add_argument('--no-align', action='store_true',
                     help='skip rotating the first sample onto the AHRS heading')
     args, ros_args = ap.parse_known_args()

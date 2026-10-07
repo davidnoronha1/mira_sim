@@ -93,8 +93,9 @@ ArduSub with GPS disabled, localised from the front RGB-D camera (RTAB-Map visua
 
 ```bash
 docker compose build mira-sim-gpu          # adds rtabmap + pymavlink + rviz2
-make bringup-vision                        # VO-driven ArduSub + RViz: use "2D Goal Pose" to send it somewhere
-make waypoints WP=tacc_square              # or fly src/vision_nav/waypoints/tacc_square.yaml
+make bringup-vision                        # SAUVC pool, VO-driven ArduSub + RViz: "2D Goal Pose" sends it there
+make bringup-vision VISION_MAP=tacc        # same on the TACC world
+make waypoints                             # fly the map's tour (src/vision_nav/waypoints/sauvc_tour.yaml)
 make compare-odom                          # VO drift vs ground truth
 make bringup-vision VISION_SOURCE=gt       # debug only: Gazebo truth instead of VO
 ```

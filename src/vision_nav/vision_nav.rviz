@@ -10,7 +10,7 @@ Visualization Manager:
       Name: Grid (1 m, surface)
       Enabled: true
       Cell Size: 1
-      Plane Cell Count: 20
+      Plane Cell Count: 60
       Color: 160; 160; 164
       Value: true
     - Class: rviz_default_plugins/Axes
@@ -19,6 +19,18 @@ Visualization Manager:
       Length: 0.5
       Radius: 0.03
       Reference Frame: odom
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: World objects (from the world SDF)
+      Enabled: true
+      Topic:
+        Value: /vision/scene
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: AUV (solid = EKF, green ghost = truth)
+      Enabled: true
+      Topic:
+        Value: /vision/auv
       Value: true
     - Class: rviz_default_plugins/Path
       Name: Gazebo truth path
@@ -97,10 +109,10 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 14
+      Distance: 30
       Focal Point:
-        X: -1
-        Y: -1
+        X: 4
+        Y: -4
         Z: -1
       Pitch: 0.9
       Yaw: -1.2

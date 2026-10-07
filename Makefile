@@ -277,8 +277,20 @@ bringup-sauvc: check-tmux $(XAUTH)
 # (rtabmap + pymavlink + rviz2): docker compose build $(GZ_SERVICE)
 VISION_SOURCE ?= vo
 VISION_DEPTH ?= 1.0
-VISION_WORLD ?= /workspace/worlds/tacc.world
-WP ?= tacc_square
+# VISION_MAP picks the world + the AUV's known start position in it (Gazebo
+# world x y = east north; VO is anchored there so goals are world coords).
+VISION_MAP ?= sauvc
+ifeq ($(VISION_MAP),tacc)
+  VISION_WORLD := /workspace/worlds/tacc.world
+  VISION_START := 0 0
+  WP ?= tacc_square
+else ifeq ($(VISION_MAP),sauvc)
+  VISION_WORLD := /workspace/sauvc_sim/worlds/sauvc25.world
+  VISION_START := 11 -11.5
+  WP ?= sauvc_tour
+else
+  $(error VISION_MAP must be sauvc or tacc)
+endif
 # HEADLESS=1: no Gazebo GUI window (server only, GPU offscreen rendering);
 # RViz still opens.
 HEADLESS ?= 0
@@ -298,7 +310,7 @@ sitl-vision:
 
 # tmux session mira-vision, one process per window:
 #   0 sitl  1 gazebo  2 bridge  3 vo  4 vision_bridge  5 goal_bridge  6 rviz
-#   7 shell (ROS-sourced, inside the sim container: run `make`-free tools
+#   7 scene (world + AUV markers for RViz)  8 shell (ROS-sourced, inside the sim container: run `make`-free tools
 #           like compare_odom.py / waypoints.py / ros2 topic ... here)
 # Ctrl-b <n> to switch windows; `make bringdown` stops everything.
 # Plain `up -d` (not --no-recreate): reuses the containers, but recreates them
@@ -306,7 +318,7 @@ sitl-vision:
 bringup-vision: check-tmux $(XAUTH)
 	@if tmux has-session -t mira-vision 2>/dev/null; then \
 		echo "⚠️  tmux session mira-vision already exists. Attach: tmux attach -t mira-vision | Kill: tmux kill-session -t mira-vision"; exit 1; fi
-	@echo "🚀 Bringup vision nav (source=$(VISION_SOURCE), depth=$(VISION_DEPTH)m$(if $(filter 1,$(HEADLESS)), headless,)) - tmux session mira-vision [$(GZ_SERVICE)]"
+	@echo "🚀 Bringup vision nav (map=$(VISION_MAP), source=$(VISION_SOURCE), depth=$(VISION_DEPTH)m$(if $(filter 1,$(HEADLESS)), headless,)) - tmux session mira-vision [$(GZ_SERVICE)]"
 	docker compose up -d $(GZ_SERVICE)
 	@docker compose exec -T $(GZ_SERVICE) test -x /opt/ros/jazzy/lib/rtabmap_odom/rgbd_odometry || { \
 		echo "❌ $(GZ_SERVICE) image lacks rtabmap/rviz2/pymavlink. Run: docker compose build $(GZ_SERVICE) && docker compose up -d --force-recreate $(GZ_SERVICE)"; exit 1; }
@@ -314,10 +326,11 @@ bringup-vision: check-tmux $(XAUTH)
 	tmux new-window -t mira-vision:1 -n gazebo 'bash -c "$(VISION_EXEC) \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(VISION_GZ_ARGS) $(VISION_WORLD)\"; exec bash"'
 	tmux new-window -t mira-vision:2 -n bridge 'bash -c "$(VISION_EXEC) \"echo Waiting for Gazebo camera...; $(WAIT_GZ_CAMERA); exec bash /workspace/vision_nav/bridge.sh\"; exec bash"'
 	tmux new-window -t mira-vision:3 -n vo 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); echo Waiting for bridged camera...; $(WAIT_ROS_CAMERA); exec bash /workspace/vision_nav/vo.sh\"; exec bash"'
-	tmux new-window -t mira-vision:4 -n vision_bridge 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec python3 /workspace/vision_nav/vision_bridge.py --source $(VISION_SOURCE)\"; exec bash"'
+	tmux new-window -t mira-vision:4 -n vision_bridge 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec python3 /workspace/vision_nav/vision_bridge.py --source $(VISION_SOURCE) --start-enu $(VISION_START)\"; exec bash"'
 	tmux new-window -t mira-vision:5 -n goal_bridge 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); exec python3 /workspace/vision_nav/goal_bridge.py --depth $(VISION_DEPTH)\"; exec bash"'
 	tmux new-window -t mira-vision:6 -n rviz 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec rviz2 -d /workspace/vision_nav/vision_nav.rviz --ros-args -p use_sim_time:=true\"; exec bash"'
-	tmux new-window -t mira-vision:7 -n shell 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); cd /workspace/vision_nav; echo; echo  waypoints: python3 waypoints.py waypoints/tacc_square.yaml; echo  VO drift:  python3 compare_odom.py; echo; exec bash\"; exec bash"'
+	tmux new-window -t mira-vision:7 -n scene 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); exec python3 /workspace/vision_nav/scene_markers.py $(VISION_WORLD)\"; exec bash"'
+	tmux new-window -t mira-vision:8 -n shell 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); cd /workspace/vision_nav; echo; echo  waypoints: python3 waypoints.py waypoints/$(WP).yaml; echo  VO drift:  python3 compare_odom.py; echo; exec bash\"; exec bash"'
 	tmux select-window -t mira-vision:5
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-vision; else tmux attach -t mira-vision; fi
 

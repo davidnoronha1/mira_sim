@@ -6,10 +6,10 @@
   /vision/gt_odom (Gazebo truth)       ->  /vision/gt_path  (for comparison)
 
 Everything is published in the `odom` frame, which is Gazebo's world frame
-(ENU, x = east, y = north). The EKF origin is the vehicle's spawn point at the
-world origin and its heading is true north (see docs/VISION_NAV.md), so
-ArduSub's local NED maps onto it directly: east = ned.y, north = ned.x,
-up = -ned.z.
+(ENU, x = east, y = north). vision_bridge anchors ArduSub's local NED frame
+to the world (VO is offset by the known start position) and the heading is
+true north (see docs/VISION_NAV.md), so it maps on directly: east = ned.y,
+north = ned.x, up = -ned.z. The goal is also drawn in the Gazebo GUI.
 
 A 2D goal has no height, so it is flown at --depth (metres below the
 surface); a PoseStamped with z < 0 (e.g. from `ros2 topic pub`) uses -z.
@@ -18,6 +18,7 @@ The first goal switches ArduSub to GUIDED and arms it.
 import argparse
 import math
 import os
+import subprocess
 import threading
 import time
 
@@ -170,11 +171,39 @@ class GoalBridge(Node):
         echo.pose.position.z = -depth
         self.pub_goal.publish(echo)
 
+        self._gz_goal_markers(p.x, p.y, -depth, yaw_enu)
+
         if self.mode != GUIDED:
             self.mav.set_mode_apm(GUIDED)
         if not self.armed:
             self.mav.arducopter_arm()
         self._send_target()
+
+    def _gz_goal_markers(self, x, y, z, yaw_enu):
+        """Highlight the goal in the Gazebo GUI via its /marker service.
+
+        GUI-only visibility, so the simulated cameras (and thus VO) never see
+        it. Silently does nothing when Gazebo runs without a GUI.
+        """
+        hx, hy = x + 0.6 * math.cos(yaw_enu), y + 0.6 * math.sin(yaw_enu)
+        mat = 'material {{ ambient {{ {c} }} diffuse {{ {c} }} emissive {{ {c} }} }}'
+        magenta = mat.format(c='r: 1 g: 0 b: 1 a: 0.9')
+        markers = [
+            f'id: 1 type: SPHERE pose {{ position {{ x: {x} y: {y} z: {z} }} }} '
+            f'scale {{ x: 0.35 y: 0.35 z: 0.35 }} {magenta}',
+            # pole up to the surface so the goal is easy to spot from above
+            f'id: 2 type: CYLINDER pose {{ position {{ x: {x} y: {y} z: {z / 2} }} }} '
+            f'scale {{ x: 0.04 y: 0.04 z: {max(-z, 0.05)} }} {magenta}',
+            f'id: 3 type: LINE_LIST point {{ x: {x} y: {y} z: {z} }} point {{ x: {hx} y: {hy} z: {z} }} '
+            f'scale {{ x: 0.05 y: 0.05 z: 0.05 }} {magenta}',
+            f'id: 4 type: TEXT text: "GOAL" pose {{ position {{ x: {x} y: {y} z: 0.4 }} }} '
+            f'scale {{ x: 0.4 y: 0.4 z: 0.4 }} {magenta}',
+        ]
+        for body in markers:
+            req = f'ns: "goal" action: ADD_MODIFY visibility: GUI {body}'
+            subprocess.Popen(['gz', 'service', '-s', '/marker', '--reqtype', 'gz.msgs.Marker',
+                              '--reptype', 'gz.msgs.Empty', '--timeout', '1000', '--req', req],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _send_target(self):
         n, e, d, yaw = self.goal

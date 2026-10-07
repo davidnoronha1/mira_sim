@@ -1,0 +1,16 @@
+# SAUVC pool tour in world coordinates: [north, east, depth(, heading)]
+# = [Gazebo y, Gazebo x, -z]. The pool is 50 m (x) by 25 m (y) and 2.2 m
+# deep; the AUV starts in the starting zone at x=11, y=-11.5.
+# Objects (sauvc25.world): qualification gates at x=-15, y=-9/0/9 (posts span
+# y +/-0.75, from 0.2 to 1.2 m deep), green mat on the floor at x=0, y=10.
+acceptance_radius: 0.5
+hold: 2
+timeout: 120
+waypoints:
+  - [-11.5, 11, 1.0]       # dive in the starting zone
+  - [-9, 0, 1.0]           # head west along the south side
+  - [-9, -12, 0.7, 270]    # line up east of gate 0, facing west
+  - [-9, -18, 0.7, 270]    # through gate 0
+  - [0, -10, 1.0]          # back towards the middle
+  - [10, 0, 1.0]           # over the green mat
+  - [-11.5, 11, 1.0]       # back to the starting zone
