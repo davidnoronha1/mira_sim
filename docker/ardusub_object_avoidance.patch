@@ -1,0 +1,115 @@
+diff --git a/ArduSub/Parameters.cpp b/ArduSub/Parameters.cpp
+index fd08d13..0af101d 100644
+--- a/ArduSub/Parameters.cpp
++++ b/ArduSub/Parameters.cpp
+@@ -772,6 +772,12 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
+     // This allows one time conversion while allowing user to flash between versions with and without converted params
+     AP_GROUPINFO_FLAGS("PARM_FMT_VER", 24, ParametersG2, param_conversion_increment, 0, AP_PARAM_FLAG_HIDDEN),
+ 
++#if AP_OAPATHPLANNER_ENABLED
++    // @Group: OA_
++    // @Path: ../libraries/AC_Avoidance/AP_OAPathPlanner.cpp
++    AP_SUBGROUPINFO(oa, "OA_", 25, ParametersG2, AP_OAPathPlanner),
++#endif
++
+     AP_GROUPEND
+ };
+ 
+diff --git a/ArduSub/Parameters.h b/ArduSub/Parameters.h
+index acde994..780b8db 100644
+--- a/ArduSub/Parameters.h
++++ b/ArduSub/Parameters.h
+@@ -394,6 +394,11 @@ public:
+     AP_Proximity proximity;
+ #endif
+ 
++#if AP_OAPATHPLANNER_ENABLED
++    // object avoidance path planning (BendyRuler / Dijkstra)
++    AP_OAPathPlanner oa;
++#endif
++
+     // RC input channels
+     RC_Channels_Sub rc_channels;
+ 
+diff --git a/ArduSub/Sub.cpp b/ArduSub/Sub.cpp
+index 8433b62..92a67be 100644
+--- a/ArduSub/Sub.cpp
++++ b/ArduSub/Sub.cpp
+@@ -112,6 +112,9 @@ const AP_Scheduler::Task Sub::scheduler_tasks[] = {
+ #endif
+     SCHED_TASK(update_batt_compass,   10,    120,  12),
+     SCHED_TASK(read_rangefinder,      20,    100,  15),
++#if HAL_PROXIMITY_ENABLED
++    SCHED_TASK_CLASS(AP_Proximity,    &sub.g2.proximity, update, 200, 200, 16),
++#endif
+     SCHED_TASK(update_altitude,       10,    100,  18),
+ #if AP_SUB_RC_ENABLED
+     SCHED_TASK_CLASS(RC_Channels, (RC_Channels*)&sub.g2.rc_channels, read_aux_all, 10,  50,  18),
+diff --git a/ArduSub/Sub.h b/ArduSub/Sub.h
+index 7145046..37b81ac 100644
+--- a/ArduSub/Sub.h
++++ b/ArduSub/Sub.h
+@@ -52,6 +52,11 @@
+ #include <AP_Mount/AP_Mount.h>           // Camera/Antenna mount
+ #include <AP_Vehicle/AP_Vehicle.h>         // needed for AHRS build
+ #include <AC_WPNav/AC_WPNav.h>           // Waypoint navigation library
++#include <AC_Avoidance/AC_Avoidance_config.h>
++#if AP_OAPATHPLANNER_ENABLED
++#include <AC_WPNav/AC_WPNav_OA.h>        // waypoint navigation with object avoidance
++#include <AC_Avoidance/AP_OAPathPlanner.h>
++#endif
+ #include <AC_WPNav/AC_Loiter.h>
+ #include <AC_WPNav/AC_Circle.h>          // circle navigation library
+ #include <AP_Scheduler/AP_Scheduler.h>       // main loop scheduler
+@@ -330,7 +335,11 @@ private:
+ 
+     AC_PosControl pos_control;
+ 
++#if AP_OAPATHPLANNER_ENABLED
++    AC_WPNav_OA wp_nav;     // routes GUIDED/AUTO waypoints around obstacles (OA_TYPE)
++#else
+     AC_WPNav wp_nav;
++#endif
+     AC_Loiter loiter_nav;
+     AC_Circle circle_nav;
+ 
+diff --git a/ArduSub/mode_guided.cpp b/ArduSub/mode_guided.cpp
+index bb790e6..ca53d7b 100644
+--- a/ArduSub/mode_guided.cpp
++++ b/ArduSub/mode_guided.cpp
+@@ -224,8 +224,14 @@ bool ModeGuided::guided_set_destination(const Vector3f& destination_neu_cm, bool
+         guided_pos_control_start();
+     }
+ 
+-    // set yaw state
+-    guided_set_yaw_state(use_yaw, yaw_cd, use_yaw_rate, yaw_rate_cds, relative_yaw);
++    // set yaw state; with no yaw or yaw rate requested, follow WP_YAW_BEHAVIOR
++    // (e.g. face along the path) instead of freezing the current heading
++    if (use_yaw || use_yaw_rate) {
++        guided_set_yaw_state(use_yaw, yaw_cd, use_yaw_rate, yaw_rate_cds, relative_yaw);
++    } else {
++        sub.yaw_rate_only = false;
++        set_auto_yaw_mode(get_default_auto_yaw_mode(false));
++    }
+ 
+     update_time_ms = AP_HAL::millis();
+ 
+diff --git a/ArduSub/system.cpp b/ArduSub/system.cpp
+index 3be221e..2be73a7 100644
+--- a/ArduSub/system.cpp
++++ b/ArduSub/system.cpp
+@@ -138,6 +138,14 @@ void Sub::init_ardupilot()
+ 
+     // initialise mission library
+     mission.init();
++
++#if HAL_PROXIMITY_ENABLED
++    // proximity sensors, e.g. PRX1_TYPE=2 fed by MAVLink OBSTACLE_DISTANCE
++    g2.proximity.init();
++#endif
++#if AP_OAPATHPLANNER_ENABLED
++    g2.oa.init();
++#endif
+ #if HAL_LOGGING_ENABLED
+     mission.set_log_start_mission_item_bit(MASK_LOG_CMD);
+ #endif

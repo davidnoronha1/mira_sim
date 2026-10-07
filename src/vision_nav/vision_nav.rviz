@@ -27,13 +27,23 @@ Visualization Manager:
         Value: /vision/scene
       Value: true
     - Class: rviz_default_plugins/MarkerArray
-      Name: AUV (solid = EKF, green ghost = truth)
+      Name: "AUV: solid = ArduSub's estimate (from VO), green ghost = Gazebo truth"
       Enabled: true
       Topic:
         Value: /vision/auv
       Value: true
+    - Class: rviz_default_plugins/LaserScan
+      Name: Obstacle ranges sent to ArduSub (from the depth camera)
+      Enabled: true
+      Color Transformer: FlatColor
+      Color: 255; 170; 0
+      Size (m): 0.06
+      Style: Spheres
+      Topic:
+        Value: /vision/obstacles
+      Value: true
     - Class: rviz_default_plugins/Path
-      Name: Gazebo truth path
+      Name: "Path: Gazebo truth (green)"
       Enabled: true
       Color: 50; 220; 50
       Line Style: Billboards
@@ -42,7 +52,7 @@ Visualization Manager:
         Value: /vision/gt_path
       Value: true
     - Class: rviz_default_plugins/Path
-      Name: ArduSub EKF path (from VO)
+      Name: "Path: ArduSub's estimate (red)"
       Enabled: true
       Color: 240; 60; 60
       Line Style: Billboards
@@ -88,10 +98,19 @@ Visualization Manager:
         Value: /vision/goal
       Value: true
     - Class: rviz_default_plugins/Image
-      Name: Front RGB-D camera
+      Name: Front camera (colour)
       Enabled: true
       Topic:
         Value: /vision/image
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Name: Front camera (depth map, near = dark)
+      Enabled: true
+      Normalize Range: false
+      Min Value: 0
+      Max Value: 6
+      Topic:
+        Value: /vision/depth
       Value: true
   Enabled: true
   Global Options:

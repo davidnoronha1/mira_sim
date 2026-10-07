@@ -25,3 +25,24 @@ EK3_SRC1_YAW     1
 # (value is what COMPASS_AUTODEC computes for 63.52N 10.35E).
 COMPASS_AUTODEC  0
 COMPASS_DEC      0.082045
+
+# --- Object avoidance (needs docker/ardusub_object_avoidance.patch) ---
+# Depth camera -> OBSTACLE_DISTANCE (src/vision_nav/obstacle_distance.py) ->
+# proximity -> object database -> BendyRuler path planner, which bends
+# GUIDED legs around obstacles. Defaults are sized for drones in open air
+# (5 m margin, 15 m lookahead) and would block everything in a 25 m pool.
+PRX1_TYPE          2
+PRX_FILT           1
+OA_TYPE            1
+# AUV half-width 0.29 m + ~0.2 m position error; gate posts are 0.75 m
+# either side of the gate centre, so it still fits through
+OA_MARGIN_MAX      0.5
+OA_BR_LOOKAHEAD    3
+OA_DB_BEAM_WIDTH   1.2
+OA_DB_DIST_MAX     8
+
+# Face along the path in GUIDED (needs the patch above: stock ArduSub holds
+# the current heading when a position target has no yaw). With OA this is the
+# bent path around obstacles, so the forward depth camera looks where the
+# AUV is going.
+WP_YAW_BEHAVIOR    1

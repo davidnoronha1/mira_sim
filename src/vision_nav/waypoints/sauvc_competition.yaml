@@ -1,0 +1,17 @@
+# SAUVC competition tour (worlds/sauvc_competition.world), world coordinates:
+# [north, east, depth(, heading deg)] = [Gazebo y, Gazebo x, -z].
+# AUV starts at x=7, y=-10 facing north. Gate posts and the orange flare
+# stand on the floor and reach up to 0.7 m below the surface, so the gate
+# is flown at 1.2 m depth. Gate opening x 6.25..7.75 at y=0; orange flare at
+# (7, -3) right in front of it - passed on its east side (~0.6 m clearance).
+acceptance_radius: 0.4
+hold: 2
+timeout: 120
+waypoints:
+  - [-10, 7, 1.2, 0]       # dive in the starting zone
+  - [-4.5, 8.2, 1.2, 0]    # swing east of the orange flare
+  - [-1.2, 7.0, 1.2, 0]    # line up on the gate centre
+  - [1.5, 7.0, 1.2, 0]     # through the gate
+  - [10, 7, 1.0, 0]        # over the blue drum (golf ball)
+  - [4, 18, 1.0, 90]       # in front of the flares, facing east
+  - [-10, 7, 1.0]          # back to the starting zone

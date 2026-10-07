@@ -276,7 +276,8 @@ bringup-sauvc: check-tmux $(XAUTH)
 # the vehicle there (goal_bridge.py). Needs the locally built image
 # (rtabmap + pymavlink + rviz2): docker compose build $(GZ_SERVICE)
 VISION_SOURCE ?= vo
-VISION_DEPTH ?= 1.0
+# 1.2 m: hull top 0.37 m under the SAUVC gate's top bar (0.7 m), floor at 2.2 m
+VISION_DEPTH ?= 1.2
 # VISION_MAP picks the world + the AUV's known start position in it (Gazebo
 # world x y = east north; VO is anchored there so goals are world coords).
 VISION_MAP ?= sauvc
@@ -285,11 +286,16 @@ ifeq ($(VISION_MAP),tacc)
   VISION_START := 0 0
   WP ?= tacc_square
 else ifeq ($(VISION_MAP),sauvc)
+  # competition layout (gate, flares, drums), worlds/sauvc_competition.world
+  VISION_WORLD := /workspace/worlds/sauvc_competition.world
+  VISION_START := 7 -10
+  WP ?= sauvc_competition
+else ifeq ($(VISION_MAP),sauvc_quali)
   VISION_WORLD := /workspace/sauvc_sim/worlds/sauvc25.world
   VISION_START := 11 -11.5
-  WP ?= sauvc_tour
+  WP ?= sauvc_quali_tour
 else
-  $(error VISION_MAP must be sauvc or tacc)
+  $(error VISION_MAP must be sauvc, sauvc_quali or tacc)
 endif
 # HEADLESS=1: no Gazebo GUI window (server only, GPU offscreen rendering);
 # RViz still opens.
@@ -309,9 +315,10 @@ sitl-vision:
 	docker compose up --no-recreate ardupilot-sitl-vision
 
 # tmux session mira-vision, one process per window:
-#   0 sitl  1 gazebo  2 bridge  3 vo  4 vision_bridge  5 goal_bridge  6 rviz
-#   7 scene (world + AUV markers for RViz)  8 shell (ROS-sourced, inside the sim container: run `make`-free tools
-#           like compare_odom.py / waypoints.py / ros2 topic ... here)
+#   0 sitl  1 gazebo  2 bridge  3 vo  4 vision_bridge
+#   5 obstacles (depth camera -> OBSTACLE_DISTANCE for ArduSub OA)
+#   6 goal_bridge  7 rviz  8 scene (world + AUV markers for RViz)
+#   9 shell (host shell in the repo: make waypoints / compare-odom / bringdown)
 # Ctrl-b <n> to switch windows; `make bringdown` stops everything.
 # Plain `up -d` (not --no-recreate): reuses the containers, but recreates them
 # when docker-compose.yml or the image changed, so config edits take effect.
@@ -322,16 +329,19 @@ bringup-vision: check-tmux $(XAUTH)
 	docker compose up -d $(GZ_SERVICE)
 	@docker compose exec -T $(GZ_SERVICE) test -x /opt/ros/jazzy/lib/rtabmap_odom/rgbd_odometry || { \
 		echo "❌ $(GZ_SERVICE) image lacks rtabmap/rviz2/pymavlink. Run: docker compose build $(GZ_SERVICE) && docker compose up -d --force-recreate $(GZ_SERVICE)"; exit 1; }
+	@# leftovers from a session whose tmux was killed would still hold the MAVLink ports
+	@docker compose exec -T $(GZ_SERVICE) pkill -f '/workspace/vision_nav/|gz sim|rviz2' 2>/dev/null || true
 	tmux new-session -d -s mira-vision -n sitl 'docker compose up ardupilot-sitl-vision; exec bash'
 	tmux new-window -t mira-vision:1 -n gazebo 'bash -c "$(VISION_EXEC) \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(VISION_GZ_ARGS) $(VISION_WORLD)\"; exec bash"'
 	tmux new-window -t mira-vision:2 -n bridge 'bash -c "$(VISION_EXEC) \"echo Waiting for Gazebo camera...; $(WAIT_GZ_CAMERA); exec bash /workspace/vision_nav/bridge.sh\"; exec bash"'
 	tmux new-window -t mira-vision:3 -n vo 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); echo Waiting for bridged camera...; $(WAIT_ROS_CAMERA); exec bash /workspace/vision_nav/vo.sh\"; exec bash"'
 	tmux new-window -t mira-vision:4 -n vision_bridge 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec python3 /workspace/vision_nav/vision_bridge.py --source $(VISION_SOURCE) --start-enu $(VISION_START)\"; exec bash"'
-	tmux new-window -t mira-vision:5 -n goal_bridge 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); exec python3 /workspace/vision_nav/goal_bridge.py --depth $(VISION_DEPTH)\"; exec bash"'
-	tmux new-window -t mira-vision:6 -n rviz 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec rviz2 -d /workspace/vision_nav/vision_nav.rviz --ros-args -p use_sim_time:=true\"; exec bash"'
-	tmux new-window -t mira-vision:7 -n scene 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); exec python3 /workspace/vision_nav/scene_markers.py $(VISION_WORLD)\"; exec bash"'
-	tmux new-window -t mira-vision:8 -n shell 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); cd /workspace/vision_nav; echo; echo  waypoints: python3 waypoints.py waypoints/$(WP).yaml; echo  VO drift:  python3 compare_odom.py; echo; exec bash\"; exec bash"'
-	tmux select-window -t mira-vision:5
+	tmux new-window -t mira-vision:5 -n obstacles 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec python3 /workspace/vision_nav/obstacle_distance.py\"; exec bash"'
+	tmux new-window -t mira-vision:6 -n goal_bridge 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); exec python3 /workspace/vision_nav/goal_bridge.py --depth $(VISION_DEPTH)\"; exec bash"'
+	tmux new-window -t mira-vision:7 -n rviz 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec rviz2 -d /workspace/vision_nav/vision_nav.rviz --ros-args -p use_sim_time:=true\"; exec bash"'
+	tmux new-window -t mira-vision:8 -n scene 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); exec python3 /workspace/vision_nav/scene_markers.py $(VISION_WORLD)\"; exec bash"'
+	tmux new-window -t mira-vision:9 -n shell -c "$(CURDIR)" 'bash -c "echo; echo  Host shell in $(CURDIR):; echo   make waypoints / make compare-odom / make bringdown; echo; exec bash"'
+	tmux select-window -t mira-vision:6
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-vision; else tmux attach -t mira-vision; fi
 
 rviz-vision: $(XAUTH)
@@ -350,10 +360,11 @@ bringdown:
 	@echo "🛑 Stopping bringup containers..."
 	docker compose stop -t 0
 	@echo "🛑 Exiting tmux bringup sessions..."
-	@tmux kill-session -t mira-vision 2>/dev/null || true
 	@tmux kill-session -t mira-sauvc 2>/dev/null || true
 	@tmux kill-session -t mira-tacc 2>/dev/null || true
 	@tmux kill-session -t mira-gz 2>/dev/null || true
+	@# last: when run from mira-vision's shell window this ends make itself
+	@tmux kill-session -t mira-vision 2>/dev/null || true
 
 
 changed:

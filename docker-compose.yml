@@ -55,7 +55,7 @@ services:
       cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/ardusub_frame_config.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:0.0.0.0:14555"
   # Vision-navigation variant: GPS disabled, horizontal position from
   # src/vision_nav/vision_bridge.py (MAVLink ODOMETRY on 14555), waypoint
-  # script on 14556, RViz goal_bridge on 14557. Separate data dir so its eeprom.bin (which persists
+  # script on 14556, RViz goal_bridge on 14557, obstacle_distance on 14558. Separate data dir so its eeprom.bin (which persists
   # params across runs) never leaks the GPS-off settings into ardupilot-sitl.
   ardupilot-sitl-vision:
     extends: ardupilot-sitl
@@ -65,7 +65,7 @@ services:
       - ./docker/ardusub_vision.parm:/ardusub_vision.parm:ro
     command: >
       -c "
-      cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/ardusub_frame_config.parm --add-param-file=/ardusub_vision.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14555 --out=udp:127.0.0.1:14556 --out=udp:127.0.0.1:14557"
+      cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/ardusub_frame_config.parm --add-param-file=/ardusub_vision.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14555 --out=udp:127.0.0.1:14556 --out=udp:127.0.0.1:14557 --out=udp:127.0.0.1:14558"
   # Primary sim: Gazebo Harmonic + the bluerov2_gz model + ardupilot_gazebo
   # plugin (both vendored as git submodules under src/). Rendering hardware
   # is auto-detected at container start (see docker/gazebo-entrypoint.sh) -
@@ -101,7 +101,7 @@ services:
       # with this project's own worlds/ and common_resources/sauvc_sim assets
       # (bind-mounted below) so no colcon/ROS build is needed to use them.
       - GZ_SIM_SYSTEM_PLUGIN_PATH=/workspace/ardupilot_gazebo/build
-      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
+      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/sauvc_sim/meshes:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
       # Also baked into the image (see docker/gazebo.Dockerfile), but
       # re-declared here so an already-running container from an older image
       # picks it up without a rebuild. Without it, `gz` doesn't register
@@ -177,7 +177,7 @@ services:
       - XAUTHORITY=/tmp/.docker.xauth
       - QT_X11_NO_MITSHM=1
       - GZ_SIM_SYSTEM_PLUGIN_PATH=/workspace/ardupilot_gazebo/build
-      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
+      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/sauvc_sim/meshes:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
       - GZ_CONFIG_PATH=/usr/share/gz:/opt/ros/jazzy/opt/gz_sim_vendor/share/gz:/opt/ros/jazzy/opt/gz_transport_vendor/share/gz
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all

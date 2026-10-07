@@ -48,12 +48,59 @@ Gazebo world frame: goals and waypoint files use plain pool coordinates.
   switches ArduSub to GUIDED, arms it, and flies there at `VISION_DEPTH`
   (default 1 m; e.g. `make bringup-vision VISION_DEPTH=2`).
 - **The goal is also highlighted in the Gazebo GUI**: magenta sphere at the
-  goal, a pole up to the surface, a heading line and a "GOAL" label. These are
-  GUI-only markers, so the simulated camera (and VO) can't see them.
+  goal, a pole up to the surface and a heading line. These are GUI-only
+  markers, so the simulated cameras (and VO) can't see them.
+- **Orange dots** = the obstacle ranges sent to ArduSub (one per sector).
 - Grid = water surface, 1 m cells. Frame `odom` = Gazebo world: x = east,
   y = north.
 - From a terminal (the tmux `shell` window), with a chosen depth (z < 0):
   `ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped "{header: {frame_id: odom}, pose: {position: {x: 6, y: -6, z: -1.5}, orientation: {w: 1}}}"`
+
+## Object avoidance (ArduPilot-native)
+
+Goals are not flown in a straight line any more: ArduSub's own object
+avoidance path planner (BendyRuler, `OA_TYPE 1`) bends GUIDED legs around
+whatever the depth camera sees. This is ArduPilot's
+[depth-camera obstacle avoidance](https://ardupilot.org/copter/docs/common-realsense-depth-camera.html)
+setup, ported to ArduSub:
+
+```
+front RGB-D camera (the same one VO uses)
+  -> obstacle_distance.py (port of d4xx_to_mavlink.py: every pixel projected
+     into the level body frame using the camera mount from TF; points within
+     +/-0.3 m of the AUV's height -> nearest per sector, 72 sectors)
+  -> MAVLink OBSTACLE_DISTANCE (udp 14558)
+  -> ArduSub proximity (PRX1_TYPE 2) -> object database -> BendyRuler
+```
+
+One camera serves both jobs. It is pitched 25° down: the floor fills the
+lower ~2/3 of the image for VO, and the top edge sits ~2° above horizontal,
+so obstacles at the AUV's height stay in view at any range. Steeper (35°)
+gave VO a little more texture but hid obstacles at body height beyond ~2 m.
+The pitch lives in `model.sdf` and `bridge.sh` (`CAMERA_PITCH`), and
+obstacle_distance.py reads it from TF.
+
+Stock ArduSub can't do this. The OA planner and the proximity library exist in
+ArduPilot and are wired into Copter/Rover, but ArduSub never creates the
+planner (no `OA_` params) and never initialises or updates proximity, so
+`PRX`/`AVOID_` settings do nothing. `docker/ardusub_object_avoidance.patch`
+(31 lines, applied in `docker/ardupilot.Dockerfile`) does the Copter-style
+wiring: `AC_WPNav_OA` instead of `AC_WPNav`, the `OA_` parameter group, and
+proximity init + a 200 Hz update task. Rebuild with
+`docker compose build ardupilot-sitl` (30-45 min).
+
+Pool-sized tuning in `ardusub_vision.parm`: `OA_MARGIN_MAX 0.5` (AUV half-width
+0.29 m + position error; the gate has 0.75 m either side of its centre),
+`OA_BR_LOOKAHEAD 3` (default 15 m sees pool walls everywhere),
+`OA_DB_BEAM_WIDTH 1.2` (one ray; the default 5 deg inflates thin posts),
+`PRX_FILT 1`.
+
+Limits: BendyRuler is reactive. It only knows what the camera has seen (database
+items expire after `OA_DB_EXPIRE` s), searches horizontally only, and won't
+make the AUV go *through* a gate on its own. A goal on the far side of the
+gate takes the shortest clear path, which may be around it. To force a gate
+pass, give it a waypoint in the gate opening at a depth below the top bar
+(0.7 m).
 
 ## Pieces
 
@@ -66,6 +113,8 @@ Gazebo world frame: goals and waypoint files use plain pool coordinates.
 | `src/vision_nav/vision_bridge.py` | odometry → MAVLink `ODOMETRY`, sets EKF origin, aligns heading |
 | `src/vision_nav/waypoints.py` | waits for EKF position, GUIDED, arm, flies a YAML waypoint list |
 | `src/vision_nav/compare_odom.py` | prints VO error vs ground truth once per second |
+| `src/vision_nav/obstacle_distance.py` | depth image → MAVLink `OBSTACLE_DISTANCE` (udp 14558) + `/vision/obstacles` LaserScan |
+| `docker/ardusub_object_avoidance.patch` | enables the OA path planner + proximity in ArduSub |
 | `src/vision_nav/goal_bridge.py` | RViz `/goal_pose` → GUIDED target; publishes EKF pose/path and truth path for RViz (MAVLink udp 14557) |
 | `src/vision_nav/scene_markers.py` | world SDF → RViz markers (`/vision/scene`); AUV mesh at EKF and truth poses (`/vision/auv`) |
 | `src/vision_nav/vision_nav.rviz` | RViz layout: truth vs EKF, goal, camera image, 2D Goal Pose tool |

@@ -26,16 +26,19 @@ os.environ.setdefault('MAVLINK20', '1')
 
 import numpy as np
 import rclpy
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped
 from nav_msgs.msg import Odometry, Path
 from pymavlink import mavutil
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from tf2_ros import TransformBroadcaster
 
 from vision_bridge import ENU_TO_NED, FLU_TO_FRD, quat_to_rot, rot_to_quat_wxyz
 
 M = mavutil.mavlink
+MASK_POS = 0b110111111000      # position only: ArduSub faces along its path (WP_YAW_BEHAVIOR)
 MASK_POS_YAW = 0b100111111000  # position + yaw, ignore velocity/accel/yaw rate
+SENDS = 3                      # copies of each target (UDP), then leave ArduSub alone
 GUIDED = 4                       # ArduSub custom mode
 PATH_STEP = 0.05                 # m between recorded path points
 
@@ -57,6 +60,8 @@ class GoalBridge(Node):
         self.args = args
         self.goal = None  # (n, e, d, yaw_ned)
         self.goal_reached = False
+        self.travel_sends = 0   # position-only targets still to send for this goal
+        self.heading_sends = 0  # final-heading targets still to send after arrival
         self.attitude = None
         self.armed = False
         self.mode = None
@@ -67,6 +72,7 @@ class GoalBridge(Node):
         self.pub_ekf_path = self.create_publisher(Path, '/vision/ekf_path', 10)
         self.pub_gt_path = self.create_publisher(Path, '/vision/gt_path', 10)
         self.pub_goal = self.create_publisher(PoseStamped, '/vision/goal', 10)
+        self.tf = TransformBroadcaster(self)  # odom -> base_link from ArduSub's estimate
         self.create_subscription(PoseStamped, '/goal_pose', self._on_goal, 10)
         self.create_subscription(Odometry, '/vision/gt_odom', self._on_gt, 10)
 
@@ -77,13 +83,14 @@ class GoalBridge(Node):
             if hb.autopilot != M.MAV_AUTOPILOT_INVALID:
                 self.mav.target_system, self.mav.target_component = hb.get_srcSystem(), hb.get_srcComponent()
                 break
+        # 30 Hz so the AUV moves smoothly in RViz (10 Hz looked jerky)
         for msg_id in (M.MAVLINK_MSG_ID_LOCAL_POSITION_NED, M.MAVLINK_MSG_ID_ATTITUDE):
             self.mav.mav.command_long_send(self.mav.target_system, self.mav.target_component,
-                                           M.MAV_CMD_SET_MESSAGE_INTERVAL, 0, msg_id, 1e5, 0, 0, 0, 0, 0)
+                                           M.MAV_CMD_SET_MESSAGE_INTERVAL, 0, msg_id, 1e6 / 30, 0, 0, 0, 0, 0)
         self.get_logger().info('Connected. Click "2D Goal Pose" in RViz to send the vehicle somewhere.')
 
         threading.Thread(target=self._mav_rx, daemon=True).start()
-        self.create_timer(1.0, self._resend_goal)
+        self.create_timer(0.3, self._resend_goal)
 
     def _new_path(self):
         p = Path()
@@ -128,6 +135,13 @@ class GoalBridge(Node):
         ps.pose.position.x, ps.pose.position.y, ps.pose.position.z = pos.y, pos.x, -pos.z
         ps.pose.orientation.w, ps.pose.orientation.x, ps.pose.orientation.y, ps.pose.orientation.z = w, x, y, z
         self.pub_pose.publish(ps)
+        tf = TransformStamped()
+        tf.header = ps.header
+        tf.child_frame_id = 'base_link'
+        tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z = \
+            ps.pose.position.x, ps.pose.position.y, ps.pose.position.z
+        tf.transform.rotation = ps.pose.orientation
+        self.tf.sendTransform(tf)
         if self._append(self.ekf_path, ps):
             self.pub_ekf_path.publish(self.ekf_path)
 
@@ -136,7 +150,8 @@ class GoalBridge(Node):
             dist = math.dist((pos.x, pos.y, pos.z), (n, e, d))
             if dist < self.args.radius:
                 self.goal_reached = True
-                self.get_logger().info(f'Goal reached (EKF says {dist:.2f} m away)')
+                self.heading_sends = SENDS
+                self.get_logger().info(f'Goal reached (EKF says {dist:.2f} m away); turning to the goal heading')
             else:
                 self.get_logger().info(f'{dist:.2f} m to goal', throttle_duration_sec=2.0)
 
@@ -160,6 +175,8 @@ class GoalBridge(Node):
         yaw_ned = math.atan2(math.cos(yaw_enu), math.sin(yaw_enu))  # pi/2 - yaw_enu, wrapped
         self.goal = (p.y, p.x, depth, yaw_ned)
         self.goal_reached = False
+        self.travel_sends = SENDS
+        self.heading_sends = 0
         self.get_logger().info(
             f'Goal: north {p.y:+.2f} m, east {p.x:+.2f} m, depth {depth:.2f} m, '
             f'heading {round(math.degrees(yaw_ned)) % 360} deg')
@@ -173,11 +190,7 @@ class GoalBridge(Node):
 
         self._gz_goal_markers(p.x, p.y, -depth, yaw_enu)
 
-        if self.mode != GUIDED:
-            self.mav.set_mode_apm(GUIDED)
-        if not self.armed:
-            self.mav.arducopter_arm()
-        self._send_target()
+        self._resend_goal()
 
     def _gz_goal_markers(self, x, y, z, yaw_enu):
         """Highlight the goal in the Gazebo GUI via its /marker service.
@@ -196,8 +209,7 @@ class GoalBridge(Node):
             f'scale {{ x: 0.04 y: 0.04 z: {max(-z, 0.05)} }} {magenta}',
             f'id: 3 type: LINE_LIST point {{ x: {x} y: {y} z: {z} }} point {{ x: {hx} y: {hy} z: {z} }} '
             f'scale {{ x: 0.05 y: 0.05 z: 0.05 }} {magenta}',
-            f'id: 4 type: TEXT text: "GOAL" pose {{ position {{ x: {x} y: {y} z: 0.4 }} }} '
-            f'scale {{ x: 0.4 y: 0.4 z: 0.4 }} {magenta}',
+            # (no TEXT marker: the ogre2 GUI renderer rejects that type)
         ]
         for body in markers:
             req = f'ns: "goal" action: ADD_MODIFY visibility: GUI {body}'
@@ -205,27 +217,37 @@ class GoalBridge(Node):
                               '--reptype', 'gz.msgs.Empty', '--timeout', '1000', '--req', req],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    def _send_target(self):
+    def _send_target(self, with_yaw):
         n, e, d, yaw = self.goal
         self.mav.mav.set_position_target_local_ned_send(
             0, self.mav.target_system, self.mav.target_component, M.MAV_FRAME_LOCAL_NED,
-            MASK_POS_YAW, n, e, d, 0, 0, 0, 0, 0, 0, yaw, 0)
+            MASK_POS_YAW if with_yaw else MASK_POS, n, e, d, 0, 0, 0, 0, 0, 0, yaw, 0)
 
     def _resend_goal(self):
-        # UDP can drop the first target or arm/mode commands; keep them flowing
+        # Get into GUIDED + armed, then send each target a few times (UDP can
+        # drop one) and stop: every new target restarts ArduSub's path, so
+        # resending continuously makes the motion stutter.
         if self.goal is None:
             return
         if self.mode != GUIDED:
             self.mav.set_mode_apm(GUIDED)
-        elif not self.armed:
+            return
+        if not self.armed:
             self.mav.arducopter_arm()
-        self._send_target()
+            return
+        if self.travel_sends > 0:
+            # position only: ArduSub faces along its (OA-bent) path
+            self._send_target(with_yaw=False)
+            self.travel_sends -= 1
+        elif self.goal_reached and self.heading_sends > 0:
+            self._send_target(with_yaw=True)
+            self.heading_sends -= 1
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--mavlink', default='udpin:0.0.0.0:14557')
-    ap.add_argument('--depth', type=float, default=1.0, help='depth for 2D goals (m)')
+    ap.add_argument('--depth', type=float, default=1.2, help='depth for 2D goals (m)')
     ap.add_argument('--radius', type=float, default=0.3, help='goal reached radius (m)')
     args, ros_args = ap.parse_known_args()
 

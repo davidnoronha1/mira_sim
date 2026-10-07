@@ -23,6 +23,17 @@ WORKDIR /ardupilot
 # Now start build instructions from http://ardupilot.org/dev/docs/setting-up-sitl-on-linux.html
 RUN git submodule update --init --recursive
 
+# Enable ArduPilot's object-avoidance path planner (OA_TYPE: BendyRuler /
+# Dijkstra) and the proximity library (PRX*_TYPE, e.g. MAVLink
+# OBSTACLE_DISTANCE from a depth camera) in ArduSub. Both exist in the
+# libraries and are wired up in ArduCopter, but ArduSub never instantiates
+# the planner or initialises/updates proximity. Also: a GUIDED position target
+# without a yaw follows WP_YAW_BEHAVIOR (e.g. face along the path) instead of
+# freezing the current heading. Written against master @ 30a9288; if a newer
+# master no longer applies, regenerate the patch.
+COPY docker/ardusub_object_avoidance.patch /tmp/ardusub_object_avoidance.patch
+RUN git apply /tmp/ardusub_object_avoidance.patch
+
 # Trick to get apt-get to not prompt for timezone in tzdata
 ENV DEBIAN_FRONTEND=noninteractive
 

@@ -65,8 +65,15 @@ def resolve_uri(uri, model_dir):
         uri = uri[len('file://'):]
     if uri.startswith(('http://', 'https://')):
         return None
-    path = uri if os.path.isabs(uri) else os.path.join(model_dir or '', uri)
-    return path if os.path.exists(path) else None
+    if os.path.isabs(uri):
+        return uri if os.path.exists(uri) else None
+    # relative: next to the model first, then anywhere on the resource path
+    # (Gazebo does the same, e.g. sauvc_sim's drums use file://drum.obj
+    # from sauvc_sim/meshes)
+    for root in [model_dir or ''] + resource_paths():
+        if os.path.exists(os.path.join(root, uri)):
+            return os.path.join(root, uri)
+    return None
 
 
 def model_sdf_path(model_dir):
@@ -222,7 +229,7 @@ class SceneMarkers(Node):
 
     def _publish_auv(self, ns, pose, tint):
         now = self.get_clock().now().nanoseconds
-        if now - self.last_pub.get(ns, 0) < 5e7:  # 20 Hz is plenty for display
+        if now - self.last_pub.get(ns, 0) < 3e7:  # cap at ~30 Hz
             return
         self.last_pub[ns] = now
         q, p = pose.orientation, pose.position
