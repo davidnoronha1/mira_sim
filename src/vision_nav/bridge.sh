@@ -6,6 +6,7 @@
 #   - /clock so ROS nodes can run on sim time (SITL is lockstepped to Gazebo)
 #   - static TF base_link -> front_camera_depth_optical (sensor pose from
 #     model.sdf + the standard x-forward -> z-forward optical rotation)
+#   - static TF odom -> world_origin (makes `odom` exist for RViz)
 set -e
 source /opt/ros/jazzy/setup.bash
 
@@ -14,7 +15,13 @@ ros2 run tf2_ros static_transform_publisher \
   --frame-id base_link --child-frame-id front_camera_depth_optical \
   --ros-args -p use_sim_time:=true &
 TF_PID=$!
-trap 'kill $TF_PID 2>/dev/null' EXIT
+# Anchor the `odom` frame (= Gazebo world, ENU) in TF so RViz can use it as
+# its fixed frame; everything goal_bridge.py draws is expressed in it.
+ros2 run tf2_ros static_transform_publisher \
+  --frame-id odom --child-frame-id world_origin \
+  --ros-args -p use_sim_time:=true &
+TF2_PID=$!
+trap 'kill $TF_PID $TF2_PID 2>/dev/null' EXIT
 
 exec ros2 run ros_gz_bridge parameter_bridge \
   /clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock \

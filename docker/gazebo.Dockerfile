@@ -42,6 +42,7 @@ RUN apt-get update \
   && apt-get -y --quiet --no-install-recommends install \
     ros-jazzy-rtabmap-odom \
     ros-jazzy-tf2-ros \
+    ros-jazzy-rviz2 \
     python3-venv \
   && rm -rf /var/lib/apt/lists/* \
   && python3 -m venv --system-site-packages /opt/mavenv \

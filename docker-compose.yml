@@ -55,7 +55,7 @@ services:
       cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/ardusub_frame_config.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:0.0.0.0:14555"
   # Vision-navigation variant: GPS disabled, horizontal position from
   # src/vision_nav/vision_bridge.py (MAVLink ODOMETRY on 14555), waypoint
-  # script on 14556. Separate data dir so its eeprom.bin (which persists
+  # script on 14556, RViz goal_bridge on 14557. Separate data dir so its eeprom.bin (which persists
   # params across runs) never leaks the GPS-off settings into ardupilot-sitl.
   ardupilot-sitl-vision:
     extends: ardupilot-sitl
@@ -65,7 +65,7 @@ services:
       - ./docker/ardusub_vision.parm:/ardusub_vision.parm:ro
     command: >
       -c "
-      cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/ardusub_frame_config.parm --add-param-file=/ardusub_vision.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14555 --out=udp:127.0.0.1:14556"
+      cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/ardusub_frame_config.parm --add-param-file=/ardusub_vision.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14555 --out=udp:127.0.0.1:14556 --out=udp:127.0.0.1:14557"
   # Primary sim: Gazebo Harmonic + the bluerov2_gz model + ardupilot_gazebo
   # plugin (both vendored as git submodules under src/). Rendering hardware
   # is auto-detected at container start (see docker/gazebo-entrypoint.sh) -
@@ -119,7 +119,16 @@ services:
     volumes:
       - /dev/shm:/dev/shm
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - /tmp/.docker.xauth:/tmp/.docker.xauth:ro
+      # X cookie written by docker/x11-setup.sh (every `make` GUI target runs
+      # it first). create_host_path: false makes a bare `docker compose up`
+      # fail loudly if it's missing, instead of Docker creating a root-owned
+      # *directory* there - which then breaks X for every later run.
+      - type: bind
+        source: /tmp/.docker.xauth
+        target: /tmp/.docker.xauth
+        read_only: true
+        bind:
+          create_host_path: false
       - ./docker/gazebo-entrypoint.sh:/entrypoint.sh:ro
       - ./worlds:/workspace/worlds:ro
       - ./src/bluerov2_gz:/workspace/bluerov2_gz:ro

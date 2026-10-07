@@ -92,11 +92,11 @@ tmux kill-session -t mira-tacc  # Kill session
 ArduSub with GPS disabled, localised from the front RGB-D camera (RTAB-Map visual odometry), flying GUIDED waypoints. Needs a locally built Gazebo image and an NVIDIA GPU for a usable camera rate.
 
 ```bash
-docker compose build mira-sim-gpu          # adds rtabmap + pymavlink
-make bringup-vision VISION_SOURCE=gt       # stage 1: Gazebo ground truth as the "vision" pose
-make bringup-vision VISION_SOURCE=vo       # stage 2: real visual odometry
-make waypoints WP=tacc_square              # fly src/vision_nav/waypoints/tacc_square.yaml
+docker compose build mira-sim-gpu          # adds rtabmap + pymavlink + rviz2
+make bringup-vision                        # VO-driven ArduSub + RViz: use "2D Goal Pose" to send it somewhere
+make waypoints WP=tacc_square              # or fly src/vision_nav/waypoints/tacc_square.yaml
 make compare-odom                          # VO drift vs ground truth
+make bringup-vision VISION_SOURCE=gt       # debug only: Gazebo truth instead of VO
 ```
 
 Details, frames and tuning: [docs/VISION_NAV.md](./docs/VISION_NAV.md).

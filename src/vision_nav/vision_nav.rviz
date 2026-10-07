@@ -1,0 +1,111 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid (1 m, surface)
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 20
+      Color: 160; 160; 164
+      Value: true
+    - Class: rviz_default_plugins/Axes
+      Name: World origin (x=east, y=north)
+      Enabled: true
+      Length: 0.5
+      Radius: 0.03
+      Reference Frame: odom
+      Value: true
+    - Class: rviz_default_plugins/Path
+      Name: Gazebo truth path
+      Enabled: true
+      Color: 50; 220; 50
+      Line Style: Billboards
+      Line Width: 0.03
+      Topic:
+        Value: /vision/gt_path
+      Value: true
+    - Class: rviz_default_plugins/Path
+      Name: ArduSub EKF path (from VO)
+      Enabled: true
+      Color: 240; 60; 60
+      Line Style: Billboards
+      Line Width: 0.03
+      Topic:
+        Value: /vision/ekf_path
+      Value: true
+    - Class: rviz_default_plugins/Odometry
+      Name: Gazebo truth pose
+      Enabled: true
+      Keep: 1
+      Shape:
+        Value: Arrow
+        Color: 50; 220; 50
+        Shaft Length: 0.5
+        Shaft Radius: 0.04
+        Head Length: 0.15
+        Head Radius: 0.08
+      Covariance:
+        Value: false
+      Topic:
+        Value: /vision/gt_odom
+      Value: true
+    - Class: rviz_default_plugins/Pose
+      Name: ArduSub EKF pose
+      Enabled: true
+      Shape: Arrow
+      Color: 240; 60; 60
+      Shaft Length: 0.5
+      Shaft Radius: 0.04
+      Head Length: 0.15
+      Head Radius: 0.08
+      Topic:
+        Value: /vision/ekf_pose
+      Value: true
+    - Class: rviz_default_plugins/Pose
+      Name: Goal
+      Enabled: true
+      Shape: Axes
+      Axes Length: 0.4
+      Axes Radius: 0.04
+      Topic:
+        Value: /vision/goal
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Name: Front RGB-D camera
+      Enabled: true
+      Topic:
+        Value: /vision/image
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 30; 40; 60
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 14
+      Focal Point:
+        X: -1
+        Y: -1
+        Z: -1
+      Pitch: 0.9
+      Yaw: -1.2
+      Name: Current View
+      Target Frame: <Fixed Frame>
+Window Geometry:
+  Width: 1400
+  Height: 900

@@ -6,6 +6,15 @@ set -e
 
 XAUTH=/tmp/.docker.xauth
 
+# If a container was started before this script ever ran, Docker creates the
+# bind-mount source as a root-owned directory (docker-compose.yml now forbids
+# that, but an old one may linger) and nothing below can replace it.
+if [ -d "$XAUTH" ]; then
+  echo "[x11-setup] ERROR: $XAUTH is a directory (created by Docker for a missing bind mount)." >&2
+  echo "[x11-setup] Fix once with:  docker compose down && sudo rmdir $XAUTH" >&2
+  exit 1
+fi
+
 # Always (re)generate when DISPLAY is set - stale cookies after VT switch /
 # display-manager restart cause "Invalid MIT-MAGIC-COOKIE-1". Remove stale file first.
 if [ -n "${DISPLAY:-}" ] && command -v xauth >/dev/null 2>&1; then

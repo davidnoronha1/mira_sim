@@ -1,4 +1,4 @@
-.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell exec-gz exec-sitl bringup-gz bringup-tacc bringup-sauvc bringdown sitl-vision bringup-vision waypoints compare-odom
+.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell exec-gz exec-sitl bringup-gz bringup-tacc bringup-sauvc bringdown sitl-vision bringup-vision rviz-vision goal-bridge waypoints compare-odom
 
 export FORCE_COLOR=1
 export RCUTILS_COLORIZED_OUTPUT=1
@@ -269,11 +269,14 @@ bringup-sauvc: check-tmux $(XAUTH)
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-sauvc; else tmux attach -t mira-sauvc; fi
 
 # --- Vision navigation (src/vision_nav, docs/VISION_NAV.md) ---
-# GPS-off ArduSub fed by vision_bridge.py. VISION_SOURCE=gt forwards Gazebo
-# ground truth (validates the EKF/GUIDED pipeline); VISION_SOURCE=vo forwards
-# RTAB-Map visual odometry from the front RGB-D camera. Needs the locally
-# built image (rtabmap + pymavlink): docker compose build $(GZ_SERVICE)
-VISION_SOURCE ?= gt
+# GPS-off ArduSub fed by vision_bridge.py. VISION_SOURCE=vo (default) forwards
+# RTAB-Map visual odometry from the front RGB-D camera; VISION_SOURCE=gt
+# forwards Gazebo ground truth instead (debugging the EKF/GUIDED side only).
+# RViz shows ArduSub's estimate vs Gazebo truth; its "2D Goal Pose" tool sends
+# the vehicle there (goal_bridge.py). Needs the locally built image
+# (rtabmap + pymavlink + rviz2): docker compose build $(GZ_SERVICE)
+VISION_SOURCE ?= vo
+VISION_DEPTH ?= 1.0
 WP ?= tacc_square
 VISION_EXEC := docker compose exec $(GZ_SERVICE) bash -c
 
@@ -289,8 +292,16 @@ bringup-vision: check-tmux $(XAUTH)
 	tmux new-window -t mira-vision:2 -n bridge 'bash -c "echo Waiting for Gazebo...; sleep 5; $(VISION_EXEC) \"exec bash /workspace/vision_nav/bridge.sh\"; exec bash"'
 	tmux new-window -t mira-vision:3 -n vo 'bash -c "sleep 8; $(VISION_EXEC) \"exec bash /workspace/vision_nav/vo.sh\"; exec bash"'
 	tmux new-window -t mira-vision:4 -n vision_bridge 'bash -c "sleep 10; $(VISION_EXEC) \"source /opt/ros/jazzy/setup.bash && exec python3 /workspace/vision_nav/vision_bridge.py --source $(VISION_SOURCE)\"; exec bash"'
-	tmux select-window -t mira-vision:4
+	tmux new-window -t mira-vision:5 -n goal_bridge 'bash -c "sleep 12; $(VISION_EXEC) \"source /opt/ros/jazzy/setup.bash && exec python3 /workspace/vision_nav/goal_bridge.py --depth $(VISION_DEPTH)\"; exec bash"'
+	tmux new-window -t mira-vision:6 -n rviz 'bash -c "sleep 12; $(VISION_EXEC) \"source /opt/ros/jazzy/setup.bash && exec rviz2 -d /workspace/vision_nav/vision_nav.rviz --ros-args -p use_sim_time:=true\"; exec bash"'
+	tmux select-window -t mira-vision:5
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-vision; else tmux attach -t mira-vision; fi
+
+rviz-vision: $(XAUTH)
+	$(VISION_EXEC) "source /opt/ros/jazzy/setup.bash && exec rviz2 -d /workspace/vision_nav/vision_nav.rviz --ros-args -p use_sim_time:=true"
+
+goal-bridge:
+	$(VISION_EXEC) "source /opt/ros/jazzy/setup.bash && exec python3 /workspace/vision_nav/goal_bridge.py --depth $(VISION_DEPTH)"
 
 waypoints:
 	$(VISION_EXEC) "exec python3 /workspace/vision_nav/waypoints.py /workspace/vision_nav/waypoints/$(WP).yaml"

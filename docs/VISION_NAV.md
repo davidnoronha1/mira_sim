@@ -15,6 +15,32 @@ gz OdometryPublisher ───────► /vision/gt_odom        vo.sh (rtab
                               waypoints.py (GUIDED, SET_POSITION_TARGET_LOCAL_NED)
 ```
 
+## What feeds ArduSub (and what doesn't)
+
+With the default `VISION_SOURCE=vo`, ArduSub's horizontal position comes only
+from RTAB-Map running on the rendered RGB-D images. Gazebo's ground-truth pose
+(`/vision/gt_odom`) never reaches ArduSub. It is only drawn in RViz and used
+by `compare_odom.py`. ArduSub's IMU, compass and barometer are simulated
+from the physics over the SITL JSON link, as on a real vehicle. GPS is off.
+`VISION_SOURCE=gt` swaps the truth in, but only for debugging the
+ArduPilot/GUIDED side.
+
+## Click-to-go in RViz
+
+`make bringup-vision` opens RViz with `vision_nav.rviz`:
+
+- **Green**: Gazebo truth (path + arrow). **Red**: what ArduSub's EKF believes
+  (path + arrow), which is what it steers by. Their gap is the VO error.
+- **2D Goal Pose** (toolbar): click a spot and drag for heading. `goal_bridge.py`
+  switches ArduSub to GUIDED, arms it, and flies there at `VISION_DEPTH`
+  (default 1 m; e.g. `make bringup-vision VISION_DEPTH=2`).
+- Grid = surface plane, 1 m cells. Frame `odom` is Gazebo's world: x = east,
+  y = north, origin = spawn.
+- From a terminal, with a chosen depth (z < 0 = depth):
+  `ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped "{header: {frame_id: odom}, pose: {position: {x: 2, y: 3, z: -1.5}, orientation: {w: 1}}}"`
+
+The Gazebo GUI still works for watching the vehicle, but it can't send goals.
+
 ## Pieces
 
 | File | Role |
@@ -26,6 +52,8 @@ gz OdometryPublisher ───────► /vision/gt_odom        vo.sh (rtab
 | `src/vision_nav/vision_bridge.py` | odometry → MAVLink `ODOMETRY`, sets EKF origin, aligns heading |
 | `src/vision_nav/waypoints.py` | waits for EKF position, GUIDED, arm, flies a YAML waypoint list |
 | `src/vision_nav/compare_odom.py` | prints VO error vs ground truth once per second |
+| `src/vision_nav/goal_bridge.py` | RViz `/goal_pose` → GUIDED target; publishes EKF pose/path and truth path for RViz (MAVLink udp 14557) |
+| `src/vision_nav/vision_nav.rviz` | RViz layout: truth vs EKF, goal, camera image, 2D Goal Pose tool |
 
 The `bluerov2_heavy` model (bluerov2_gz fork) carries the
 `OdometryPublisher` plugin and sets `gz_frame_id` on `front_camera_depth`.
@@ -68,6 +96,9 @@ The `bluerov2_heavy` model (bluerov2_gz fork) carries the
 | VO lost frames | 0 | 0 (plus 1 at startup, by design) |
 | VO rate / latency | 30 Hz / ~26 ms | 30 Hz / ~26 ms |
 
+RViz-style goal (2 m east, 3 m north, heading north) on VO only: reached
+within 6 cm of the target by Gazebo truth, heading 358°.
+
 ## Bring-up checklist
 
 1. `docker compose build mira-sim-gpu` (the GHCR image lacks rtabmap/pymavlink).
@@ -82,6 +113,12 @@ The `bluerov2_heavy` model (bluerov2_gz fork) carries the
 
 ## Troubleshooting
 
+- **RViz / Gazebo GUI "could not connect to display" and x11-setup says
+  `/tmp/.docker.xauth is a directory`**: a container was started (bare
+  `docker compose up`) before the cookie file existed, and Docker created a
+  directory there. Run `docker compose down && sudo rmdir /tmp/.docker.xauth`
+  once. The compose file now refuses to start in that case rather than
+  creating the directory.
 - **No images / 0 Hz**: rendering fell back to software (`/tmp/gz-render-env.sh`
   says `ogre`). Use the `mira-sim-gpu` service (`MIRA_GPU=1`).
 - **rtabmap "Did not receive data"**: check the image frame with
