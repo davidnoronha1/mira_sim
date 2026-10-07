@@ -33,6 +33,21 @@ RUN apt-get update \
     gstreamer1.0-gl \
   && rm -rf /var/lib/apt/lists/*
 
+# -- Vision navigation (src/vision_nav) ------------------------------------
+# RTAB-Map RGB-D visual odometry, plus pymavlink for the ROS -> ArduSub
+# bridge. pymavlink goes in a venv for the same reason as in
+# ardupilot.Dockerfile (Debian numpy has no pip RECORD file);
+# --system-site-packages keeps rclpy/numpy/yaml from the ROS install visible.
+RUN apt-get update \
+  && apt-get -y --quiet --no-install-recommends install \
+    ros-jazzy-rtabmap-odom \
+    ros-jazzy-tf2-ros \
+    python3-venv \
+  && rm -rf /var/lib/apt/lists/* \
+  && python3 -m venv --system-site-packages /opt/mavenv \
+  && /opt/mavenv/bin/pip install --no-cache-dir pymavlink
+ENV PATH="/opt/mavenv/bin:${PATH}"
+
 # -- Build ardupilot_gazebo plugin ----------------------------------------
 COPY src/ardupilot_gazebo /workspace/ardupilot_gazebo
 RUN cd /workspace/ardupilot_gazebo \

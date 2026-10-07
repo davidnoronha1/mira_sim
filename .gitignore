@@ -36,4 +36,5 @@ __pycache__/
 
 ardupilot/
 ardupilot/*
+ardupilot_vision/
 .vscode/

@@ -87,6 +87,20 @@ tmux attach -t mira-tacc    # Attach to session
 tmux kill-session -t mira-tacc  # Kill session
 ```
 
+## Vision Navigation (GPS-free)
+
+ArduSub with GPS disabled, localised from the front RGB-D camera (RTAB-Map visual odometry), flying GUIDED waypoints. Needs a locally built Gazebo image and an NVIDIA GPU for a usable camera rate.
+
+```bash
+docker compose build mira-sim-gpu          # adds rtabmap + pymavlink
+make bringup-vision VISION_SOURCE=gt       # stage 1: Gazebo ground truth as the "vision" pose
+make bringup-vision VISION_SOURCE=vo       # stage 2: real visual odometry
+make waypoints WP=tacc_square              # fly src/vision_nav/waypoints/tacc_square.yaml
+make compare-odom                          # VO drift vs ground truth
+```
+
+Details, frames and tuning: [docs/VISION_NAV.md](./docs/VISION_NAV.md).
+
 ## Troubleshooting
 
 For detailed troubleshooting steps (X11 issues, QGC connection, performance tuning, etc.), see [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md).
@@ -102,6 +116,7 @@ mira_sim/
 ├── src/
 │   ├── bluerov2_gz/              # BlueROV2 model (submodule)
 │   ├── ardupilot_gazebo/         # FDM bridge (submodule)
+│   ├── vision_nav/               # RGB-D VO -> ArduSub bridge, waypoints
 │   └── sauvc_sim/                # SAUVC models (submodule)
 ├── Makefile
 ├── GAZEBO_NOTES.md               # Technical integration notes

@@ -1,4 +1,4 @@
-.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell exec-gz exec-sitl bringup-gz bringup-tacc bringup-sauvc bringdown
+.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell exec-gz exec-sitl bringup-gz bringup-tacc bringup-sauvc bringdown sitl-vision bringup-vision waypoints compare-odom
 
 export FORCE_COLOR=1
 export RCUTILS_COLORIZED_OUTPUT=1
@@ -268,10 +268,41 @@ bringup-sauvc: check-tmux $(XAUTH)
 	tmux select-window -t mira-sauvc:0
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-sauvc; else tmux attach -t mira-sauvc; fi
 
+# --- Vision navigation (src/vision_nav, docs/VISION_NAV.md) ---
+# GPS-off ArduSub fed by vision_bridge.py. VISION_SOURCE=gt forwards Gazebo
+# ground truth (validates the EKF/GUIDED pipeline); VISION_SOURCE=vo forwards
+# RTAB-Map visual odometry from the front RGB-D camera. Needs the locally
+# built image (rtabmap + pymavlink): docker compose build $(GZ_SERVICE)
+VISION_SOURCE ?= gt
+WP ?= tacc_square
+VISION_EXEC := docker compose exec $(GZ_SERVICE) bash -c
+
+sitl-vision:
+	docker compose up --no-recreate ardupilot-sitl-vision
+
+bringup-vision: check-tmux $(XAUTH)
+	@if tmux has-session -t mira-vision 2>/dev/null; then \
+		echo "⚠️  tmux session mira-vision already exists. Attach: tmux attach -t mira-vision | Kill: tmux kill-session -t mira-vision"; exit 1; fi
+	@echo "🚀 Bringup vision nav (source=$(VISION_SOURCE)) - tmux session mira-vision [$(GZ_SERVICE)]"
+	tmux new-session -d -s mira-vision -n sitl 'docker compose up --no-recreate ardupilot-sitl-vision; exec bash'
+	tmux new-window -t mira-vision:1 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && $(VISION_EXEC) \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) /workspace/worlds/tacc.world\"; exec bash"'
+	tmux new-window -t mira-vision:2 -n bridge 'bash -c "echo Waiting for Gazebo...; sleep 5; $(VISION_EXEC) \"exec bash /workspace/vision_nav/bridge.sh\"; exec bash"'
+	tmux new-window -t mira-vision:3 -n vo 'bash -c "sleep 8; $(VISION_EXEC) \"exec bash /workspace/vision_nav/vo.sh\"; exec bash"'
+	tmux new-window -t mira-vision:4 -n vision_bridge 'bash -c "sleep 10; $(VISION_EXEC) \"source /opt/ros/jazzy/setup.bash && exec python3 /workspace/vision_nav/vision_bridge.py --source $(VISION_SOURCE)\"; exec bash"'
+	tmux select-window -t mira-vision:4
+	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-vision; else tmux attach -t mira-vision; fi
+
+waypoints:
+	$(VISION_EXEC) "exec python3 /workspace/vision_nav/waypoints.py /workspace/vision_nav/waypoints/$(WP).yaml"
+
+compare-odom:
+	$(VISION_EXEC) "source /opt/ros/jazzy/setup.bash && exec python3 /workspace/vision_nav/compare_odom.py"
+
 bringdown:
 	@echo "🛑 Stopping bringup containers..."
 	docker compose stop -t 0
 	@echo "🛑 Exiting tmux bringup sessions..."
+	@tmux kill-session -t mira-vision 2>/dev/null || true
 	@tmux kill-session -t mira-sauvc 2>/dev/null || true
 	@tmux kill-session -t mira-tacc 2>/dev/null || true
 	@tmux kill-session -t mira-gz 2>/dev/null || true

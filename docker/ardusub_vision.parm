@@ -1,0 +1,15 @@
+# Vision navigation overlay, loaded after ardusub_frame_config.parm by the
+# ardupilot-sitl-vision compose service. GPS off; horizontal position and
+# velocity come from MAVLink ODOMETRY sent by src/vision_nav/vision_bridge.py.
+# Depth stays on the baro (ArduSub's pressure sensor), heading on the compass
+# (vision_bridge aligns the VO frame to it at startup).
+GPS1_TYPE        0
+SIM_GPS1_ENABLE  0
+VISO_TYPE        1
+VISO_DELAY_MS    30
+VISO_QUAL_MIN    1
+EK3_SRC1_POSXY   6
+EK3_SRC1_VELXY   6
+EK3_SRC1_POSZ    1
+EK3_SRC1_VELZ    0
+EK3_SRC1_YAW     1

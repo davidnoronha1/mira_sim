@@ -1,0 +1,13 @@
+# 4 m x 4 m square at 1 m depth next to the spawn point (NED metres from the
+# EKF origin = vehicle start). In tacc.world north = Gazebo +y, east = +x, so
+# this heads west along the pipe. Adjust depth if the seafloor is in the way.
+acceptance_radius: 0.5
+hold: 3
+timeout: 120
+waypoints:
+  - [0, 0, 1]
+  - [2, 0, 1]
+  - [2, -4, 1]
+  - [-2, -4, 1]
+  - [-2, 0, 1]
+  - [0, 0, 1]

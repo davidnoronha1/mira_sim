@@ -52,6 +52,19 @@ services:
     command: >
       -c "
       cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/ardusub_frame_config.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:0.0.0.0:14555"
+  # Vision-navigation variant: GPS disabled, horizontal position from
+  # src/vision_nav/vision_bridge.py (MAVLink ODOMETRY on 14555), waypoint
+  # script on 14556. Separate data dir so its eeprom.bin (which persists
+  # params across runs) never leaks the GPS-off settings into ardupilot-sitl.
+  ardupilot-sitl-vision:
+    extends: ardupilot-sitl
+    volumes:
+      - ./ardupilot_vision:/ardupilot_data
+      - ./docker/ardusub_frame_config.parm:/ardusub_frame_config.parm:ro
+      - ./docker/ardusub_vision.parm:/ardusub_vision.parm:ro
+    command: >
+      -c "
+      cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/ardusub_frame_config.parm --add-param-file=/ardusub_vision.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14555 --out=udp:127.0.0.1:14556"
   # Primary sim: Gazebo Harmonic + the bluerov2_gz model + ardupilot_gazebo
   # plugin (both vendored as git submodules under src/). Rendering hardware
   # is auto-detected at container start (see docker/gazebo-entrypoint.sh) -
@@ -113,6 +126,7 @@ services:
       - ./src/sauvc_sim:/workspace/sauvc_sim:ro
       - ./src/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/models:ro
       - ./src/ardupilot_gazebo/worlds:/workspace/ardupilot_gazebo/worlds:ro
+      - ./src/vision_nav:/workspace/vision_nav:ro
     # Intel/AMD iGPU passthrough (`devices: - /dev/dri:/dev/dri`) was tried
     # here for hardware-accelerated rendering (mira-sim-gpu above covers the
     # NVIDIA case via runtime: nvidia) but is currently REVERTED: on this
