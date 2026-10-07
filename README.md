@@ -98,6 +98,7 @@ make bringup-vision VISION_MAP=tacc        # same on the TACC world
 make waypoints                             # fly the map's tour (src/vision_nav/waypoints/sauvc_tour.yaml)
 make compare-odom                          # VO drift vs ground truth
 make bringup-vision VISION_SOURCE=gt       # debug only: Gazebo truth instead of VO
+make record-demo                           # video: Gazebo + RViz, 2D Goal Pose, avoidance
 ```
 
 Details, frames and tuning: [docs/VISION_NAV.md](./docs/VISION_NAV.md).

@@ -38,3 +38,6 @@ ardupilot/
 ardupilot/*
 ardupilot_vision/
 .vscode/
+
+# make record-demo output
+recordings/

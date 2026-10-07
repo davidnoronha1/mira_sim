@@ -1,4 +1,4 @@
-.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell exec-gz exec-sitl bringup-gz bringup-tacc bringup-sauvc bringdown sitl-vision bringup-vision rviz-vision goal-bridge waypoints compare-odom
+.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell exec-gz exec-sitl bringup-gz bringup-tacc bringup-sauvc bringdown sitl-vision bringup-vision rviz-vision goal-bridge waypoints compare-odom record-demo
 
 export FORCE_COLOR=1
 export RCUTILS_COLORIZED_OUTPUT=1
@@ -330,7 +330,7 @@ bringup-vision: check-tmux $(XAUTH)
 	@docker compose exec -T $(GZ_SERVICE) test -x /opt/ros/jazzy/lib/rtabmap_odom/rgbd_odometry || { \
 		echo "❌ $(GZ_SERVICE) image lacks rtabmap/rviz2/pymavlink. Run: docker compose build $(GZ_SERVICE) && docker compose up -d --force-recreate $(GZ_SERVICE)"; exit 1; }
 	@# leftovers from a session whose tmux was killed would still hold the MAVLink ports
-	@docker compose exec -T $(GZ_SERVICE) pkill -f '/workspace/vision_nav/|gz sim|rviz2' 2>/dev/null || true
+	@docker compose exec -T $(GZ_SERVICE) pkill -f '/workspace/vision_nav/|gz sim|rviz2|parameter_bridge|static_transform_publisher|rgbd_odometry' 2>/dev/null || true
 	tmux new-session -d -s mira-vision -n sitl 'docker compose up ardupilot-sitl-vision; exec bash'
 	tmux new-window -t mira-vision:1 -n gazebo 'bash -c "$(VISION_EXEC) \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(VISION_GZ_ARGS) $(VISION_WORLD)\"; exec bash"'
 	tmux new-window -t mira-vision:2 -n bridge 'bash -c "$(VISION_EXEC) \"echo Waiting for Gazebo camera...; $(WAIT_GZ_CAMERA); exec bash /workspace/vision_nav/bridge.sh\"; exec bash"'
@@ -355,6 +355,15 @@ waypoints:
 
 compare-odom:
 	$(VISION_EXEC) "source /opt/ros/jazzy/setup.bash && exec python3 /workspace/vision_nav/compare_odom.py"
+
+# Video of click-to-go: Gazebo GUI + RViz side by side on a private Xvfb
+# display, a real "2D Goal Pose" mouse drag in RViz, ArduSub flying there
+# around obstacles. Output: recordings/vision_nav_demo.mp4. Needs Xvfb,
+# xdotool, x11-utils and ffmpeg on the host; see docker/record-demo.sh for
+# GOAL / SPEEDUP / TIMEOUT. Runs instead of bringup-vision, not alongside it.
+record-demo:
+	GZ_SERVICE=$(GZ_SERVICE) VISION_SOURCE=$(VISION_SOURCE) VISION_DEPTH=$(VISION_DEPTH) \
+	WORLD=$(VISION_WORLD) START_ENU="$(VISION_START)" bash ./docker/record-demo.sh
 
 bringdown:
 	@echo "🛑 Stopping bringup containers..."
