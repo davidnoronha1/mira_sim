@@ -124,7 +124,7 @@ services:
       # fail loudly if it's missing, instead of Docker creating a root-owned
       # *directory* there - which then breaks X for every later run.
       - type: bind
-        source: /tmp/.docker.xauth
+        source: /tmp/.mira-sim.xauth
         target: /tmp/.docker.xauth
         read_only: true
         bind:

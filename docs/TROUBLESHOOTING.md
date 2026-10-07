@@ -27,7 +27,7 @@ If no output, the auth cookie doesn't exist.
 ```bash
 make check-x11  # Auto-generates xauth cookie
 # Or manually:
-touch /tmp/.docker.xauth
+touch /tmp/.mira-sim.xauth
 xauth add $DISPLAY MIT-MAGIC-COOKIE-1 $(openssl rand -hex 16)
 ```
 

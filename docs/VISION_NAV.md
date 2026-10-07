@@ -113,12 +113,13 @@ within 6 cm of the target by Gazebo truth, heading 358°.
 
 ## Troubleshooting
 
-- **RViz / Gazebo GUI "could not connect to display" and x11-setup says
-  `/tmp/.docker.xauth is a directory`**: a container was started (bare
-  `docker compose up`) before the cookie file existed, and Docker created a
-  directory there. Run `docker compose down && sudo rmdir /tmp/.docker.xauth`
-  once. The compose file now refuses to start in that case rather than
-  creating the directory.
+- **RViz / Gazebo GUI "could not connect to display"**: the X cookie is
+  written by `docker/x11-setup.sh` to `/tmp/.mira-sim.xauth` (every GUI make
+  target runs it). The compose file refuses to start the sim container if that
+  file is missing, rather than letting Docker create a root-owned directory in
+  its place, so run it through `make` or `make check-x11` first. A leftover
+  root-owned `/tmp/.docker.xauth` directory from older versions is harmless
+  and no longer used.
 - **No images / 0 Hz**: rendering fell back to software (`/tmp/gz-render-env.sh`
   says `ogre`). Use the `mira-sim-gpu` service (`MIRA_GPU=1`).
 - **rtabmap "Did not receive data"**: check the image frame with

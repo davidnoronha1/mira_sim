@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Generates /tmp/.docker.xauth so Gazebo's GUI can connect to the host X server
+# Generates /tmp/.mira-sim.xauth (mounted in the container as /tmp/.docker.xauth) so Gazebo's GUI can connect to the host X server
 # from inside the mira_sim container (rootless, network_mode:host, X11 passthrough).
 # Pattern from src/bluerov2_gz/docker/run.sh with hardening for Wayland/XWayland.
 set -e
 
-XAUTH=/tmp/.docker.xauth
+XAUTH=/tmp/.mira-sim.xauth
 
 # If a container was started before this script ever ran, Docker creates the
 # bind-mount source as a root-owned directory (docker-compose.yml now forbids
