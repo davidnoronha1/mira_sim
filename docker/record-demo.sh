@@ -80,18 +80,16 @@ in_sim "until gz topic -l 2>/dev/null | grep -q /sim/front_camera/image; do slee
 bg_sim bridge "exec bash /workspace/vision_nav/bridge.sh"
 in_sim "source /opt/ros/jazzy/setup.bash; until ros2 topic list 2>/dev/null | grep -q /vision/image; do sleep 1; done"
 [ "$VISION_SOURCE" = vo ] && bg_sim vo "exec bash /workspace/vision_nav/vo.sh"
-bg_sim vision_bridge "exec python3 -u /workspace/vision_nav/vision_bridge.py --source $VISION_SOURCE --start-enu $START_ENU"
-bg_sim obstacles "exec python3 -u /workspace/vision_nav/obstacle_distance.py"
-bg_sim goal_bridge "exec python3 -u /workspace/vision_nav/goal_bridge.py --depth $VISION_DEPTH"
-bg_sim scene "exec python3 -u /workspace/vision_nav/scene_markers.py $RVIZ_WORLD"
-bg_sim rviz "exec rviz2 -d /workspace/vision_nav/record.rviz --ros-args -p use_sim_time:=true"
+read -r START_X START_Y <<<"$START_ENU"
+bg_sim nav "exec ros2 launch /workspace/vision_nav/nav.launch.py source:=$VISION_SOURCE start_x:=$START_X start_y:=$START_Y depth:=$VISION_DEPTH"
+bg_sim viz "exec ros2 launch /workspace/vision_nav/viz.launch.py world:=$RVIZ_WORLD rviz_config:=/workspace/vision_nav/record.rviz"
 
 wait_log() {  # file, pattern, what
   log "waiting for $3 ..."
   until grep -q "$2" "$LOGDIR/$1.log" 2>/dev/null; do sleep 2; done
 }
-wait_log vision_bridge "Aligned" "ArduSub heading alignment"
-wait_log goal_bridge "Connected" "goal_bridge"
+wait_log nav "Aligned" "ArduSub heading alignment"
+wait_log nav "Connected. Click" "goal_bridge"
 
 # --- lay the windows out side by side ---------------------------------------
 find_win() { for _ in $(seq 60); do w=$(xdotool search --onlyvisible --name "$1" | head -1); [ -n "$w" ] && { echo "$w"; return; }; sleep 1; done; return 1; }
@@ -142,15 +140,15 @@ for i in 1 2 3 4 5 6; do
 done
 xdotool sleep 0.5 mouseup 1
 xdotool mousemove $((HALF - 40)) $((H - 40))  # park the cursor out of the way
-wait_log goal_bridge "Goal:" "goal_bridge to take the goal"
-grep "Goal:" "$LOGDIR/goal_bridge.log" | tail -1
+wait_log nav "Goal:" "goal_bridge to take the goal"
+grep "Goal:" "$LOGDIR/nav.log" | tail -1
 
 START=$SECONDS
-until grep -q "Goal reached" "$LOGDIR/goal_bridge.log"; do
+until grep -q "Goal reached" "$LOGDIR/nav.log"; do
   (( SECONDS - START > TIMEOUT )) && { log "timeout waiting for the goal"; break; }
   sleep 5
 done
-grep "Goal reached" "$LOGDIR/goal_bridge.log" | tail -1 || true
+grep "Goal reached" "$LOGDIR/nav.log" | tail -1 || true
 sleep 20  # let it turn to the goal heading
 kill -INT "$FFMPEG_PID"; wait "$FFMPEG_PID" || true; FFMPEG_PID=
 

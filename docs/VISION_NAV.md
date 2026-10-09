@@ -127,6 +127,8 @@ pass, give it a waypoint in the gate opening at a depth below the top bar
 | `ardupilot-sitl-vision` (compose) | SITL with the overlay above; own `./ardupilot_vision` data dir so params don't leak into the normal SITL |
 | `src/vision_nav/bridge.sh` | ros_gz_bridge for camera + GT odometry + `/clock`, static TF `base_link → front_camera_depth_optical` |
 | `src/vision_nav/vo.sh` | `rtabmap_odom rgbd_odometry`; extra args are passed through (e.g. `-p Reg/Strategy:="'1'"`) |
+| `src/vision_nav/nav.launch.py` | runs `vision_bridge`, `obstacle_distance` and `goal_bridge` (args `source`, `start_x`, `start_y`, `depth`) |
+| `src/vision_nav/viz.launch.py` | runs `rviz2` and `scene_markers` (args `world`, `rviz_config`) |
 | `src/vision_nav/vision_bridge.py` | odometry → MAVLink `ODOMETRY`, sets EKF origin, aligns heading |
 | `src/vision_nav/waypoints.py` | waits for EKF position, GUIDED, arm, flies a YAML waypoint list |
 | `src/vision_nav/compare_odom.py` | prints VO error vs ground truth once per second |
@@ -192,7 +194,7 @@ down so more of the floor texture is in view.
 
 1. `docker compose build mira-sim-gpu` (the GHCR image lacks rtabmap/pymavlink).
 2. `make bringup-vision VISION_SOURCE=gt`
-   - `vision_bridge` window: `EKF origin set`, `Aligned ...`, `sent ~30` per second.
+   - `nav` window (vision_bridge, obstacle_distance, goal_bridge): `EKF origin set`, `Aligned ...`, `sent ~30` per second.
    - QGC: no GPS, EKF happy, vehicle appears on the map at the origin.
 3. `make waypoints` – should fly the square in Gazebo.
 4. `make bringdown`, then `make bringup-vision VISION_SOURCE=vo`.

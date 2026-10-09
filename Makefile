@@ -315,10 +315,10 @@ sitl-vision:
 	docker compose up --no-recreate ardupilot-sitl-vision
 
 # tmux session mira-vision, one process per window:
-#   0 sitl  1 gazebo  2 bridge  3 vo  4 vision_bridge
-#   5 obstacles (depth camera -> OBSTACLE_DISTANCE for ArduSub OA)
-#   6 goal_bridge  7 rviz  8 scene (world + AUV markers for RViz)
-#   9 shell (host shell in the repo: make waypoints / compare-odom / bringdown)
+#   0 sitl  1 gazebo  2 bridge  3 vo
+#   4 nav   (nav.launch.py: vision_bridge, obstacle_distance, goal_bridge)
+#   5 viz   (viz.launch.py: rviz2, scene_markers)
+#   6 shell (host shell in the repo: make waypoints / compare-odom / bringdown)
 # Ctrl-b <n> to switch windows; `make bringdown` stops everything.
 # All use `up --no-recreate` so containers persist across runs.
 bringup-vision: check-tmux $(XAUTH)
@@ -333,13 +333,10 @@ bringup-vision: check-tmux $(XAUTH)
 	tmux new-window -t mira-vision:1 -n gazebo 'bash -c "$(VISION_EXEC) \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(VISION_GZ_ARGS) $(VISION_WORLD)\"; exec bash"'
 	tmux new-window -t mira-vision:2 -n bridge 'bash -c "$(VISION_EXEC) \"echo Waiting for Gazebo camera...; $(WAIT_GZ_CAMERA); exec bash /workspace/vision_nav/bridge.sh\"; exec bash"'
 	tmux new-window -t mira-vision:3 -n vo 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); echo Waiting for bridged camera...; $(WAIT_ROS_CAMERA); exec bash /workspace/vision_nav/vo.sh\"; exec bash"'
-	tmux new-window -t mira-vision:4 -n vision_bridge 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec python3 /workspace/vision_nav/vision_bridge.py --source $(VISION_SOURCE) --start-enu $(VISION_START)\"; exec bash"'
-	tmux new-window -t mira-vision:5 -n obstacles 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec python3 /workspace/vision_nav/obstacle_distance.py\"; exec bash"'
-	tmux new-window -t mira-vision:6 -n goal_bridge 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); exec python3 /workspace/vision_nav/goal_bridge.py --depth $(VISION_DEPTH)\"; exec bash"'
-	tmux new-window -t mira-vision:7 -n rviz 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec rviz2 -d /workspace/vision_nav/vision_nav.rviz --ros-args -p use_sim_time:=true\"; exec bash"'
-	tmux new-window -t mira-vision:8 -n scene 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); exec python3 /workspace/vision_nav/scene_markers.py $(VISION_WORLD)\"; exec bash"'
-	tmux new-window -t mira-vision:9 -n shell -c "$(CURDIR)" 'bash -c "echo; echo  Host shell in $(CURDIR):; echo   make waypoints / make compare-odom / make bringdown; echo; exec bash"'
-	tmux select-window -t mira-vision:6
+	tmux new-window -t mira-vision:4 -n nav 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec ros2 launch /workspace/vision_nav/nav.launch.py source:=$(VISION_SOURCE) start_x:=$(word 1,$(VISION_START)) start_y:=$(word 2,$(VISION_START)) depth:=$(VISION_DEPTH)\"; exec bash"'
+	tmux new-window -t mira-vision:5 -n viz 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec ros2 launch /workspace/vision_nav/viz.launch.py world:=$(VISION_WORLD)\"; exec bash"'
+	tmux new-window -t mira-vision:6 -n shell -c "$(CURDIR)" 'bash -c "echo; echo  Host shell in $(CURDIR):; echo   make waypoints / make compare-odom / make bringdown; echo; exec bash"'
+	tmux select-window -t mira-vision:4
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-vision; else tmux attach -t mira-vision; fi
 
 rviz-vision: $(XAUTH)
