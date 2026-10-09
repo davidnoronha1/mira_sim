@@ -68,6 +68,9 @@ fine) and replaces `bringup-vision`, so `make bringdown` first.
 - Default goal: just short of the SAUVC gate, straight through the orange
   flare, so the planner has to bend around it. Change it with
   `GOAL="x y heading_deg"` (Gazebo world coordinates).
+- With an NVIDIA GPU, record on your own display so cameras render on the GPU
+  (Xvfb is CPU-only GL, too slow for VO): `make record-demo REC_DISPLAY=$DISPLAY`.
+  The top-left 1920x1080 of that screen is recorded; leave it alone meanwhile.
 - `SPEEDUP=2` speeds the video up (useful with software rendering, where the
   sim runs at ~0.3x real time); `VISION_SOURCE`, `VISION_DEPTH` as above.
 - Layouts: `record_gui.config` (Gazebo) and `record.rviz` (top-down RViz view,

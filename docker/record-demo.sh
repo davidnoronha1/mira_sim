@@ -3,8 +3,10 @@
 # RViz (right) side by side, a "2D Goal Pose" dragged in RViz with the mouse,
 # and ArduSub flying there with object avoidance. Run via `make record-demo`.
 #
-# Everything is drawn on a private Xvfb display, so it works headless and
-# never touches your desktop. The goal is a real mouse drag (xdotool) with
+# By default everything is drawn on a private Xvfb display, so it works
+# headless and never touches your desktop. Xvfb renders with the CPU, though,
+# which is too slow for RTAB-Map VO: on a GPU machine use your own display
+# (REC_DISPLAY=$DISPLAY) and leave the windows alone while it records. The goal is a real mouse drag (xdotool) with
 # RViz's 2D Goal Pose tool, so what you see is exactly what a user does.
 #
 # Needs on the host: Xvfb, xdotool, xwininfo (x11-utils), ffmpeg.
@@ -21,7 +23,7 @@
 #   GZ_SERVICE           compose service (as in the Makefile)
 #   WORLD                world for Gazebo, RVIZ_WORLD for scene_markers
 #   COMPOSE="docker compose"  e.g. add -f overrides
-#   REC_DISPLAY=:99
+#   REC_DISPLAY=:99      an existing display (e.g. $DISPLAY) is used as-is
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -62,13 +64,21 @@ cleanup() {
 trap cleanup EXIT
 
 # --- virtual display ------------------------------------------------------
-log "Xvfb on $REC_DISPLAY (${W}x${H})"
-Xvfb "$REC_DISPLAY" -screen 0 ${W}x${H}x24 -ac +extension GLX +render -noreset >"$LOGDIR/xvfb.log" 2>&1 &
-XVFB_PID=$!
 export DISPLAY=$REC_DISPLAY
-for _ in $(seq 50); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.2; done
-# compose bind-mounts the X cookie; Xvfb runs with -ac, so an empty one will do
-[ -e /tmp/.mira-sim.xauth ] || { touch /tmp/.mira-sim.xauth; chmod a+r /tmp/.mira-sim.xauth; }
+if xdpyinfo >/dev/null 2>&1; then
+  # An existing display, e.g. REC_DISPLAY=$DISPLAY: keeps GPU rendering
+  # (Xvfb is software-only GL, too slow for VO). Records its top-left WxH.
+  log "using existing display $REC_DISPLAY (top-left ${W}x${H} is recorded)"
+  bash ./docker/x11-setup.sh
+  xhost +local: >/dev/null 2>&1 || true
+else
+  log "Xvfb on $REC_DISPLAY (${W}x${H})"
+  Xvfb "$REC_DISPLAY" -screen 0 ${W}x${H}x24 -ac +extension GLX +render -noreset >"$LOGDIR/xvfb.log" 2>&1 &
+  XVFB_PID=$!
+  for _ in $(seq 50); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.2; done
+  # compose bind-mounts the X cookie; Xvfb runs with -ac, so an empty one will do
+  [ -e /tmp/.mira-sim.xauth ] || { touch /tmp/.mira-sim.xauth; chmod a+r /tmp/.mira-sim.xauth; }
+fi
 
 # --- simulator + vision nav stack (same pieces as `make bringup-vision`) ---
 $COMPOSE up -d "$GZ_SERVICE" >/dev/null
