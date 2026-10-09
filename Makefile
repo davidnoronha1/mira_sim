@@ -217,9 +217,9 @@ exec-sitl:
 #   2:gazebo - docker compose exec gz sim <world>
 # All use `up --no-recreate` so containers persist (Ctrl-C stops, not removes).
 # Attach: tmux attach -t mira-<competition>  Kill: tmux kill-session -t mira-<competition>
-TMUX := $(shell command -v tmux 2>/dev/null)
+TMUX_EXISTS := $(shell command -v tmux 2>/dev/null)
 check-tmux:
-ifndef TMUX
+ifndef TMUX_EXISTS
 	$(error ❌ tmux not found. Install with: sudo apt install tmux)
 endif
 
@@ -320,18 +320,16 @@ sitl-vision:
 #   6 goal_bridge  7 rviz  8 scene (world + AUV markers for RViz)
 #   9 shell (host shell in the repo: make waypoints / compare-odom / bringdown)
 # Ctrl-b <n> to switch windows; `make bringdown` stops everything.
-# Plain `up -d` (not --no-recreate): reuses the containers, but recreates them
-# when docker-compose.yml or the image changed, so config edits take effect.
+# All use `up --no-recreate` so containers persist across runs.
 bringup-vision: check-tmux $(XAUTH)
 	@if tmux has-session -t mira-vision 2>/dev/null; then \
 		echo "⚠️  tmux session mira-vision already exists. Attach: tmux attach -t mira-vision | Kill: tmux kill-session -t mira-vision"; exit 1; fi
 	@echo "🚀 Bringup vision nav (map=$(VISION_MAP), source=$(VISION_SOURCE), depth=$(VISION_DEPTH)m$(if $(filter 1,$(HEADLESS)), headless,)) - tmux session mira-vision [$(GZ_SERVICE)]"
-	docker compose up -d $(GZ_SERVICE)
+	docker compose up --no-recreate -d $(GZ_SERVICE)
 	@docker compose exec -T $(GZ_SERVICE) test -x /opt/ros/jazzy/lib/rtabmap_odom/rgbd_odometry || { \
 		echo "❌ $(GZ_SERVICE) image lacks rtabmap/rviz2/pymavlink. Run: docker compose build $(GZ_SERVICE) && docker compose up -d --force-recreate $(GZ_SERVICE)"; exit 1; }
-	@# leftovers from a session whose tmux was killed would still hold the MAVLink ports
 	@docker compose exec -T $(GZ_SERVICE) pkill -f '/workspace/vision_nav/|gz sim|rviz2|parameter_bridge|static_transform_publisher|rgbd_odometry' 2>/dev/null || true
-	tmux new-session -d -s mira-vision -n sitl 'docker compose up ardupilot-sitl-vision; exec bash'
+	tmux new-session -d -s mira-vision -n sitl 'docker compose up --no-recreate ardupilot-sitl-vision; exec bash'
 	tmux new-window -t mira-vision:1 -n gazebo 'bash -c "$(VISION_EXEC) \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(VISION_GZ_ARGS) $(VISION_WORLD)\"; exec bash"'
 	tmux new-window -t mira-vision:2 -n bridge 'bash -c "$(VISION_EXEC) \"echo Waiting for Gazebo camera...; $(WAIT_GZ_CAMERA); exec bash /workspace/vision_nav/bridge.sh\"; exec bash"'
 	tmux new-window -t mira-vision:3 -n vo 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); echo Waiting for bridged camera...; $(WAIT_ROS_CAMERA); exec bash /workspace/vision_nav/vo.sh\"; exec bash"'
@@ -369,11 +367,16 @@ bringdown:
 	@echo "🛑 Stopping bringup containers..."
 	docker compose stop -t 0
 	@echo "🛑 Exiting tmux bringup sessions..."
-	@tmux kill-session -t mira-sauvc 2>/dev/null || true
-	@tmux kill-session -t mira-tacc 2>/dev/null || true
-	@tmux kill-session -t mira-gz 2>/dev/null || true
-	@# last: when run from mira-vision's shell window this ends make itself
-	@tmux kill-session -t mira-vision 2>/dev/null || true
+	@cur_session=$$(tmux display-message -p '#S' 2>/dev/null || true); \
+	for s in mira-sauvc mira-tacc mira-gz mira-vision; do \
+		if [ "$$s" != "$$cur_session" ]; then \
+			tmux kill-session -t "$$s" 2>/dev/null || true; \
+		fi; \
+	done; \
+	case "$$cur_session" in \
+		mira-sauvc|mira-tacc|mira-gz|mira-vision) \
+			tmux kill-session -t "$$cur_session" 2>/dev/null || true ;; \
+	esac
 
 
 changed:
