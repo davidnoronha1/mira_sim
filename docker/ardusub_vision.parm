@@ -46,3 +46,9 @@ OA_DB_DIST_MAX     8
 # bent path around obstacles, so the forward depth camera looks where the
 # AUV is going.
 WP_YAW_BEHAVIOR    1
+
+# Cap the yaw rate (default 0 = unlimited; ~80 deg/s seen). Fast spins, e.g.
+# turning to the goal heading on arrival, smear the camera images and VO
+# under-reads the motion: the EKF/truth gap jumped there. The GUIDED heading
+# slew uses a fixed rate, so ATC_RATE_WPY_MAX would not cover it.
+ATC_RATE_Y_MAX     30
