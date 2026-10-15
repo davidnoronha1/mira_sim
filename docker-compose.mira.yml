@@ -1,0 +1,65 @@
+# Dedicated opt-in services reuse the simulator base, mounts and rendering setup.
+# The original simulator services remain unchanged.
+services:
+  mira-stack:
+    extends:
+      file: docker-compose.yml
+      service: mira_sim
+    container_name: mira-stack
+    profiles: [mira]
+    image: mira-sim-stack:cpu
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: docker/mira-stack.Dockerfile
+      args:
+        TORCH_VARIANT: cpu
+        MIRA_SIM_BASE: ghcr.io/davidnoronha1/mira_sim-gazebo:${MIRA_SIM_TAG:-latest}
+    environment:
+      # Host UIDs without an image passwd entry get HOME=/; ROS/gz logs need a writable home.
+      HOME: /tmp
+      YOLO_CONFIG_DIR: /tmp
+      # Nameless host UIDs break gz-transport's default hostname:username partition.
+      GZ_PARTITION: mira_stack
+      YOLO_DEVICE: CPU
+      YOLO_MODEL: best.onnx
+    volumes:
+      - type: bind
+        source: ${MIRA_ROOT:-../mira}
+        target: /mira
+        read_only: true
+        bind:
+          create_host_path: false
+      - ${MIRA_STACK_BUILD:-./.mira-stack}:/mira_build
+      - ./docker:/workspace/mira-stack:ro
+  mira-stack-gpu:
+    extends:
+      file: docker-compose.yml
+      service: mira-sim-gpu
+    container_name: mira-stack-gpu
+    profiles: [mira]
+    image: mira-sim-stack:cu128
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: docker/mira-stack.Dockerfile
+      args:
+        TORCH_VARIANT: cu128
+        MIRA_SIM_BASE: ghcr.io/davidnoronha1/mira_sim-gazebo:${MIRA_SIM_TAG:-latest}
+    environment:
+      # Host UIDs without an image passwd entry get HOME=/; ROS/gz logs need a writable home.
+      HOME: /tmp
+      YOLO_CONFIG_DIR: /tmp
+      # Nameless host UIDs break gz-transport's default hostname:username partition.
+      GZ_PARTITION: mira_stack
+      YOLO_DEVICE: GPU
+      YOLO_MODEL: best.pt
+    volumes:
+      - type: bind
+        source: ${MIRA_ROOT:-../mira}
+        target: /mira
+        read_only: true
+        bind:
+          create_host_path: false
+      - ${MIRA_STACK_BUILD:-./.mira-stack}:/mira_build
+      - ./docker:/workspace/mira-stack:ro

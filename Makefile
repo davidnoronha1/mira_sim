@@ -1,4 +1,4 @@
-.PHONY: master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell exec-gz exec-sitl bringup-gz bringup-tacc bringup-sauvc bringdown sitl-vision bringup-vision rviz-vision goal-bridge waypoints compare-odom record-demo
+.PHONY: gpu-banner master alt_master build source install-deps submodules update install-udev bs fix-vscode dashboard telemetry-viz simulator-gz simulator-tacc-gz simulator-sauvc-gz sitl shell exec-gz exec-sitl bringup-gz bringup-tacc bringup-sauvc bringdown sitl-vision bringup-vision rviz-vision goal-bridge waypoints compare-odom record-demo
 
 export FORCE_COLOR=1
 export RCUTILS_COLORIZED_OUTPUT=1
@@ -10,6 +10,7 @@ export RCUTILS_CONSOLE_OUTPUT_FORMAT={severity} {message}
 # at all). Forcing UDP-only here keeps any host-side `ros2 run`/`launch`
 # consistent with the container's matching FASTDDS_BUILTIN_TRANSPORTS.
 export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+export MIRA_SIM_CPUS MIRA_SITL_CPUS
 SHELL := /bin/bash
 
 WS := source .venv/bin/activate && source install/setup.bash
@@ -37,6 +38,8 @@ else
 	$(info ✅ Virtual environment found at .venv.)
 endif
 
+# Integrated container targets do not require host Python 3.12 or ROS.
+ifeq ($(filter mira-stack-build bringup-mira mira-actions mira-stack-down mira-stack-check,$(MAKECMDGOALS)),)
 # ---- Python checks ----
 ifdef VIRTUAL_ENV
 	$(error ❌ Active virtual environment detected ($(VIRTUAL_ENV)). Please run 'deactivate' before running make)
@@ -58,6 +61,8 @@ endif
 $(info ✅ python3     → $(PYTHON3_PATH))
 $(info ✅ python3.12  → $(PYTHON312_PATH))
 
+
+endif
 
 check-ros: check-uv
 ifndef ROS_JAZZY_EXISTS
@@ -160,24 +165,30 @@ ifeq ($(MIRA_GPU),1)
 else ifeq ($(MIRA_GPU),0)
   GZ_SERVICE ?= mira_sim
 else
-  # Auto-detect: nvidia-smi present => gpu, else default
-  GZ_SERVICE ?= $(shell command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1 && echo mira-sim-gpu || echo mira_sim)
+  # Auto-detect: a working driver AND Docker's nvidia runtime => gpu, else default.
+  # Without nvidia-container-toolkit, `runtime: nvidia` fails instead of degrading.
+  GZ_SERVICE ?= $(shell nvidia-smi -L >/dev/null 2>&1 && docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"' && echo mira-sim-gpu || echo mira_sim)
 endif
 
 $(XAUTH): check-x11
 	@true
 
-simulator-gz: $(XAUTH)
+# Loud GPU/CPU banner; bringup targets also pin it to their tmux status bar.
+GPU_BANNER := bash ./docker/gpu-banner.sh $(GZ_SERVICE)
+gpu-banner:
+	@$(GPU_BANNER)
+
+simulator-gz: gpu-banner $(XAUTH)
 	@echo "🚀 Gazebo service: $(GZ_SERVICE)"
 	docker compose up --no-recreate -d $(GZ_SERVICE)
 	docker compose exec $(GZ_SERVICE) bash -c "source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) bluerov2_heavy_underwater.world"
 
-simulator-tacc-gz: $(XAUTH)
+simulator-tacc-gz: gpu-banner $(XAUTH)
 	@echo "🚀 Gazebo service: $(GZ_SERVICE)"
 	docker compose up --no-recreate -d $(GZ_SERVICE)
 	docker compose exec $(GZ_SERVICE) bash -c "source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) /workspace/worlds/tacc.world"
 
-simulator-sauvc-gz: $(XAUTH)
+simulator-sauvc-gz: gpu-banner $(XAUTH)
 	@echo "🚀 Gazebo service: $(GZ_SERVICE)"
 	docker compose up --no-recreate -d $(GZ_SERVICE)
 	docker compose exec $(GZ_SERVICE) bash -c "source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) /workspace/sauvc_sim/worlds/sauvc25.world"
@@ -192,7 +203,7 @@ simulator-sauvc-gz: $(XAUTH)
 sitl:
 	docker compose up --no-recreate ardupilot-sitl
 
-shell: $(XAUTH)
+shell: gpu-banner $(XAUTH)
 	@echo "🐚 Shell service: $(GZ_SERVICE)"
 	docker compose up --no-recreate -d $(GZ_SERVICE)
 	docker compose exec $(GZ_SERVICE) bash
@@ -230,27 +241,29 @@ else
   SITL_CMD := docker compose up --no-recreate ardupilot-sitl; exec bash
 endif
 
-bringup-gz: check-tmux $(XAUTH)
+bringup-gz: check-tmux gpu-banner $(XAUTH)
 	@if tmux has-session -t mira-gz 2>/dev/null; then \
 		echo "⚠️  tmux session mira-gz already exists. Attach: tmux attach -t mira-gz | Kill: tmux kill-session -t mira-gz"; exit 1; fi
 	@echo "🚀 Bringup GZ (bluerov2_heavy) - tmux session mira-gz [$(GZ_SERVICE)]$(if $(filter 1,$(NO_ARDUPILOT)), [NO_ARDUPILOT=1],)"
 	tmux new-session -d -s mira-gz -n sitl '$(SITL_CMD)'
-	tmux new-window -t mira-gz:1 -n bridge 'bash -c "echo Waiting for Gazebo to be ready...; sleep 5; docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash -c \"source /opt/ros/jazzy/setup.bash && exec ros2 run ros_gz_bridge parameter_bridge /front_camera/left/image_raw@sensor_msgs/msg/Image@gz.msgs.Image /front_camera/right/image_raw@sensor_msgs/msg/Image@gz.msgs.Image /sim/front_camera/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked /bottom_camera@sensor_msgs/msg/Image@gz.msgs.Image --ros-args -r __ns:=/bluerov2_bridge\"; exec bash"'
+	tmux new-window -t mira-gz:1 -n bridge 'bash -c "echo Waiting for Gazebo to be ready...; sleep 5; docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash /workspace/vision_nav/competition_bridge.sh; exec bash"'
 	tmux new-window -t mira-gz:2 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash -c \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) bluerov2_heavy_underwater.world\"; exec bash"'
+	@$(GPU_BANNER) mira-gz >/dev/null
 	tmux select-window -t mira-gz:0
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-gz; else tmux attach -t mira-gz; fi
 
-bringup-tacc: check-tmux $(XAUTH)
+bringup-tacc: check-tmux gpu-banner $(XAUTH)
 	@if tmux has-session -t mira-tacc 2>/dev/null; then \
 		echo "⚠️  tmux session mira-tacc already exists. Attach: tmux attach -t mira-tacc | Kill: tmux kill-session -t mira-tacc"; exit 1; fi
 	@echo "🚀 Bringup TACC - tmux session mira-tacc [$(GZ_SERVICE)]$(if $(filter 1,$(NO_ARDUPILOT)), [NO_ARDUPILOT=1],)"
 	tmux new-session -d -s mira-tacc -n sitl '$(SITL_CMD)'
-	tmux new-window -t mira-tacc:1 -n bridge 'bash -c "echo Waiting for Gazebo to be ready...; sleep 5; docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash -c \"source /opt/ros/jazzy/setup.bash && exec ros2 run ros_gz_bridge parameter_bridge /front_camera/left/image_raw@sensor_msgs/msg/Image@gz.msgs.Image /front_camera/right/image_raw@sensor_msgs/msg/Image@gz.msgs.Image /sim/front_camera/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked /bottom_camera@sensor_msgs/msg/Image@gz.msgs.Image --ros-args -r __ns:=/bluerov2_bridge\"; exec bash"'
+	tmux new-window -t mira-tacc:1 -n bridge 'bash -c "echo Waiting for Gazebo to be ready...; sleep 5; docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash /workspace/vision_nav/competition_bridge.sh; exec bash"'
 	tmux new-window -t mira-tacc:2 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash -c \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) /workspace/worlds/tacc.world\"; exec bash"'
+	@$(GPU_BANNER) mira-tacc >/dev/null
 	tmux select-window -t mira-tacc:0
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-tacc; else tmux attach -t mira-tacc; fi
 
-bringup-sauvc: check-tmux $(XAUTH)
+bringup-sauvc: check-tmux gpu-banner $(XAUTH)
 	@if tmux has-session -t mira-sauvc 2>/dev/null; then \
 		echo "⚠️  tmux session mira-sauvc already exists. Attach: tmux attach -t mira-sauvc | Kill: tmux kill-session -t mira-sauvc"; exit 1; fi
 	@echo "🚀 Bringup SAUVC - tmux session mira-sauvc [$(GZ_SERVICE)]$(if $(filter 1,$(NO_ARDUPILOT)), [NO_ARDUPILOT=1],)"
@@ -263,8 +276,9 @@ bringup-sauvc: check-tmux $(XAUTH)
 	# mismatch, some deeper participant/port issue on the shared network stack).
 	# A bridge co-located with gzserver reliably receives and republishes camera
 	# data; the same bridge run on the host never received a single frame.
-	tmux new-window -t mira-sauvc:1 -n bridge 'bash -c "echo Waiting for Gazebo to be ready...; sleep 5; docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash -c \"source /opt/ros/jazzy/setup.bash && exec ros2 run ros_gz_bridge parameter_bridge /cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist /front_camera/left/image_raw@sensor_msgs/msg/Image@gz.msgs.Image /front_camera/right/image_raw@sensor_msgs/msg/Image@gz.msgs.Image /sim/front_camera/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked /bottom_camera@sensor_msgs/msg/Image@gz.msgs.Image /side_cam@sensor_msgs/msg/Image@gz.msgs.Image /world/pool_world/create@ros_gz_interfaces/srv/SpawnEntity --ros-args -r __ns:=/sauvc_bridge\"; exec bash"'
+	tmux new-window -t mira-sauvc:1 -n bridge 'bash -c "echo Waiting for Gazebo to be ready...; sleep 5; docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash /workspace/vision_nav/competition_bridge.sh sauvc; exec bash"'
 	tmux new-window -t mira-sauvc:2 -n gazebo 'bash -c "docker compose up --no-recreate -d $(GZ_SERVICE) && docker compose exec $(GZ_SERVICE) bash -c \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(GZ_ARGS) /workspace/sauvc_sim/worlds/sauvc25.world\"; exec bash"'
+	@$(GPU_BANNER) mira-sauvc >/dev/null
 	tmux select-window -t mira-sauvc:0
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-sauvc; else tmux attach -t mira-sauvc; fi
 
@@ -276,6 +290,21 @@ bringup-sauvc: check-tmux $(XAUTH)
 # the vehicle there (goal_bridge.py). Needs the locally built image
 # (rtabmap + pymavlink + rviz2): docker compose build $(GZ_SERVICE)
 VISION_SOURCE ?= vo
+ifeq ($(filter $(VISION_SOURCE),vo gt),)
+  $(error VISION_SOURCE must be vo or gt)
+endif
+# GT runs skip VO unless explicitly requested for drift comparisons.
+VISION_COMPARE ?= 0
+ifeq ($(filter $(VISION_COMPARE),0 1),)
+  $(error VISION_COMPARE must be 0 or 1)
+endif
+VISION_VO := $(if $(filter vo,$(VISION_SOURCE)),1,$(VISION_COMPARE))
+VISUALIZE ?= 1
+ifeq ($(filter $(VISUALIZE),0 1),)
+  $(error VISUALIZE must be 0 or 1)
+endif
+VISION_PATH_MAX_POINTS ?= 2000
+VISION_PATH_RATE ?= 2.0
 # 1.2 m: hull top 0.37 m under the SAUVC gate's top bar (0.7 m), floor at 2.2 m
 VISION_DEPTH ?= 1.2
 # VISION_MAP picks the world + the AUV's known start position in it (Gazebo
@@ -298,7 +327,7 @@ else
   $(error VISION_MAP must be sauvc, sauvc_quali or tacc)
 endif
 # HEADLESS=1: no Gazebo GUI window (server only, GPU offscreen rendering);
-# RViz still opens.
+# RViz is independently controlled by VISUALIZE=0.
 HEADLESS ?= 0
 ifeq ($(HEADLESS),1)
   VISION_GZ_ARGS := -v3 -s -r --headless-rendering
@@ -321,21 +350,24 @@ sitl-vision:
 #   6 shell (host shell in the repo: make waypoints / compare-odom / bringdown)
 # Ctrl-b <n> to switch windows; `make bringdown` stops everything.
 # All use `up --no-recreate` so containers persist across runs.
-bringup-vision: check-tmux $(XAUTH)
+bringup-vision: check-tmux gpu-banner $(XAUTH)
 	@if tmux has-session -t mira-vision 2>/dev/null; then \
 		echo "⚠️  tmux session mira-vision already exists. Attach: tmux attach -t mira-vision | Kill: tmux kill-session -t mira-vision"; exit 1; fi
 	@echo "🚀 Bringup vision nav (map=$(VISION_MAP), source=$(VISION_SOURCE), depth=$(VISION_DEPTH)m$(if $(filter 1,$(HEADLESS)), headless,)) - tmux session mira-vision [$(GZ_SERVICE)]"
 	docker compose up --no-recreate -d $(GZ_SERVICE)
-	@docker compose exec -T $(GZ_SERVICE) test -x /opt/ros/jazzy/lib/rtabmap_odom/rgbd_odometry || { \
-		echo "❌ $(GZ_SERVICE) image lacks rtabmap/rviz2/pymavlink. Run: docker compose build $(GZ_SERVICE) && docker compose up -d --force-recreate $(GZ_SERVICE)"; exit 1; }
+	@if [ "$(VISION_VO)" = 1 ]; then docker compose exec -T $(GZ_SERVICE) test -x /opt/ros/jazzy/lib/rtabmap_odom/rgbd_odometry || { \
+		echo "❌ $(GZ_SERVICE) image lacks rtabmap. Run: docker compose build $(GZ_SERVICE) && docker compose up -d --force-recreate $(GZ_SERVICE)"; exit 1; }; fi
 	@docker compose exec -T $(GZ_SERVICE) pkill -f '/workspace/vision_nav/|gz sim|rviz2|parameter_bridge|static_transform_publisher|rgbd_odometry' 2>/dev/null || true
 	tmux new-session -d -s mira-vision -n sitl 'docker compose up --no-recreate ardupilot-sitl-vision; exec bash'
 	tmux new-window -t mira-vision:1 -n gazebo 'bash -c "$(VISION_EXEC) \"source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim $(VISION_GZ_ARGS) $(VISION_WORLD)\"; exec bash"'
 	tmux new-window -t mira-vision:2 -n bridge 'bash -c "$(VISION_EXEC) \"echo Waiting for Gazebo camera...; $(WAIT_GZ_CAMERA); exec bash /workspace/vision_nav/bridge.sh\"; exec bash"'
-	tmux new-window -t mira-vision:3 -n vo 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); echo Waiting for bridged camera...; $(WAIT_ROS_CAMERA); exec bash /workspace/vision_nav/vo.sh\"; exec bash"'
-	tmux new-window -t mira-vision:4 -n nav 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec ros2 launch /workspace/vision_nav/nav.launch.py source:=$(VISION_SOURCE) start_x:=$(word 1,$(VISION_START)) start_y:=$(word 2,$(VISION_START)) depth:=$(VISION_DEPTH)\"; exec bash"'
-	tmux new-window -t mira-vision:5 -n viz 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec ros2 launch /workspace/vision_nav/viz.launch.py world:=$(VISION_WORLD)\"; exec bash"'
+	@if [ "$(VISION_VO)" = 1 ]; then \
+		tmux new-window -t mira-vision:3 -n vo 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); echo Waiting for bridged camera...; $(WAIT_ROS_CAMERA); exec bash /workspace/vision_nav/vo.sh\"; exec bash"'; fi
+	tmux new-window -t mira-vision:4 -n nav 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec ros2 launch /workspace/vision_nav/nav.launch.py source:=$(VISION_SOURCE) start_x:=$(word 1,$(VISION_START)) start_y:=$(word 2,$(VISION_START)) depth:=$(VISION_DEPTH) visualize:=$(if $(filter 1,$(VISUALIZE)),true,false) path_max_points:=$(VISION_PATH_MAX_POINTS) path_rate:=$(VISION_PATH_RATE)\"; exec bash"'
+	@if [ "$(VISUALIZE)" = 1 ]; then \
+		tmux new-window -t mira-vision:5 -n viz 'bash -c "$(VISION_EXEC) \"$(ROS_SRC); $(WAIT_ROS_CAMERA); exec ros2 launch /workspace/vision_nav/viz.launch.py world:=$(VISION_WORLD)\"; exec bash"'; fi
 	tmux new-window -t mira-vision:6 -n shell -c "$(CURDIR)" 'bash -c "echo; echo  Host shell in $(CURDIR):; echo   make waypoints / make compare-odom / make bringdown; echo; exec bash"'
+	@$(GPU_BANNER) mira-vision >/dev/null
 	tmux select-window -t mira-vision:4
 	@if [ -n "$$TMUX" ]; then tmux switch-client -t mira-vision; else tmux attach -t mira-vision; fi
 
@@ -343,7 +375,7 @@ rviz-vision: $(XAUTH)
 	$(VISION_EXEC) "source /opt/ros/jazzy/setup.bash && exec rviz2 -d /workspace/vision_nav/vision_nav.rviz --ros-args -p use_sim_time:=true"
 
 goal-bridge:
-	$(VISION_EXEC) "source /opt/ros/jazzy/setup.bash && exec python3 /workspace/vision_nav/goal_bridge.py --depth $(VISION_DEPTH)"
+	$(VISION_EXEC) "source /opt/ros/jazzy/setup.bash && exec python3 /workspace/vision_nav/goal_bridge.py --depth $(VISION_DEPTH) --visualize $(if $(filter 1,$(VISUALIZE)),true,false) --path-max-points $(VISION_PATH_MAX_POINTS) --path-rate $(VISION_PATH_RATE)"
 
 waypoints:
 	$(VISION_EXEC) "exec python3 /workspace/vision_nav/waypoints.py /workspace/vision_nav/waypoints/$(WP).yaml"
@@ -356,8 +388,9 @@ compare-odom:
 # around obstacles. Output: recordings/vision_nav_demo.mp4. Needs Xvfb,
 # xdotool, x11-utils and ffmpeg on the host; see docker/record-demo.sh for
 # GOAL / SPEEDUP / TIMEOUT. Runs instead of bringup-vision, not alongside it.
-record-demo:
+record-demo: gpu-banner
 	GZ_SERVICE=$(GZ_SERVICE) VISION_SOURCE=$(VISION_SOURCE) VISION_DEPTH=$(VISION_DEPTH) \
+	VISION_COMPARE=$(VISION_COMPARE) VISION_PATH_MAX_POINTS=$(VISION_PATH_MAX_POINTS) VISION_PATH_RATE=$(VISION_PATH_RATE) \
 	WORLD=$(VISION_WORLD) START_ENU="$(VISION_START)" bash ./docker/record-demo.sh
 
 bringdown:
@@ -568,3 +601,27 @@ help:
 	$(info )
 	$(info   help          - Show this help message)
 
+# Real Mira application stack, opt-in compose overlay (no duplicate sim bridges).
+MIRA_ROOT ?= $(abspath ../mira)
+MIRA_STACK_BUILD ?= $(CURDIR)/.mira-stack
+TARGET_CLASS ?= dock
+RUN_ACTIONS ?= 1
+AUTO_ARM ?= true
+ACTION_WAIT ?= 120
+VISION_CONFIG ?= /mira/src/mira2_vision/config/guided_front.yaml
+VO_BACKEND ?= auto
+SIM_DETECTOR ?= gazebo
+export MIRA_ROOT MIRA_STACK_BUILD TARGET_CLASS RUN_ACTIONS AUTO_ARM ACTION_WAIT VISION_CONFIG VO_BACKEND SIM_DETECTOR
+export GZ_SERVICE VISION_MAP VISION_SOURCE HEADLESS
+.PHONY: mira-stack-build bringup-mira mira-actions mira-stack-down mira-stack-check
+mira-stack-build:
+	python3 docker/mira-stack.py build
+bringup-mira:
+	python3 docker/mira-stack.py up
+	@$(GPU_BANNER) mira-stack
+mira-actions:
+	python3 docker/mira-stack.py actions
+mira-stack-down:
+	python3 docker/mira-stack.py down
+mira-stack-check:
+	python3 docker/mira-stack.py check
