@@ -34,6 +34,7 @@ from rclpy.parameter import Parameter
 from tf2_ros import TransformBroadcaster
 
 from vision_bridge import ENU_TO_NED, FLU_TO_FRD, quat_to_rot, rot_to_quat_wxyz
+from path_history import PathHistory
 
 M = mavutil.mavlink
 MASK_POS = 0b110111111000      # position only: ArduSub faces along its path (WP_YAW_BEHAVIOR)
@@ -65,16 +66,19 @@ class GoalBridge(Node):
         self.attitude = None
         self.armed = False
         self.mode = None
-        self.ekf_path = self._new_path()
-        self.gt_path = self._new_path()
+        self.visualize = args.visualize == 'true'
+        self.ekf_path = PathHistory(args.path_max_points, PATH_STEP)
+        self.gt_path = PathHistory(args.path_max_points, PATH_STEP)
 
         self.pub_pose = self.create_publisher(PoseStamped, '/vision/ekf_pose', 10)
-        self.pub_ekf_path = self.create_publisher(Path, '/vision/ekf_path', 10)
-        self.pub_gt_path = self.create_publisher(Path, '/vision/gt_path', 10)
+        self.pub_ekf_path = self.create_publisher(Path, '/vision/ekf_path', 1)
+        self.pub_gt_path = self.create_publisher(Path, '/vision/gt_path', 1)
         self.pub_goal = self.create_publisher(PoseStamped, '/vision/goal', 10)
         self.tf = TransformBroadcaster(self)  # odom -> base_link from ArduSub's estimate
         self.create_subscription(PoseStamped, '/goal_pose', self._on_goal, 10)
-        self.create_subscription(Odometry, '/vision/gt_odom', self._on_gt, 10)
+        if self.visualize:
+            self.create_subscription(Odometry, '/vision/gt_odom', self._on_gt, 1)
+            self.create_timer(1.0 / args.path_rate, self._publish_paths)
 
         self.mav = mavutil.mavlink_connection(args.mavlink, source_system=253)
         self.get_logger().info(f'Waiting for ArduSub heartbeat on {args.mavlink} ...')
@@ -92,20 +96,19 @@ class GoalBridge(Node):
         threading.Thread(target=self._mav_rx, daemon=True).start()
         self.create_timer(0.3, self._resend_goal)
 
-    def _new_path(self):
-        p = Path()
-        p.header.frame_id = 'odom'
-        return p
-
-    @staticmethod
-    def _append(path, pose):
-        if path.poses:
-            a, b = path.poses[-1].pose.position, pose.pose.position
-            if math.dist((a.x, a.y, a.z), (b.x, b.y, b.z)) < PATH_STEP:
-                return False
-        path.poses.append(pose)
-        path.header.stamp = pose.header.stamp
-        return True
+    def _publish_paths(self):
+        for history, pub in ((self.ekf_path, self.pub_ekf_path),
+                             (self.gt_path, self.pub_gt_path)):
+            if not pub.get_subscription_count():
+                continue
+            poses = history.snapshot()
+            if not poses:
+                continue
+            path = Path()
+            path.header.frame_id = 'odom'
+            path.header.stamp = poses[-1].header.stamp
+            path.poses = poses
+            pub.publish(path)
 
     # ---- ArduSub -> ROS -------------------------------------------------
     def _mav_rx(self):
@@ -142,8 +145,8 @@ class GoalBridge(Node):
             ps.pose.position.x, ps.pose.position.y, ps.pose.position.z
         tf.transform.rotation = ps.pose.orientation
         self.tf.sendTransform(tf)
-        if self._append(self.ekf_path, ps):
-            self.pub_ekf_path.publish(self.ekf_path)
+        if self.visualize:
+            self.ekf_path.append(ps)
 
         if self.goal and not self.goal_reached:
             n, e, d, _ = self.goal
@@ -160,8 +163,7 @@ class GoalBridge(Node):
         ps.header = msg.header
         ps.header.frame_id = 'odom'
         ps.pose = msg.pose.pose
-        if self._append(self.gt_path, ps):
-            self.pub_gt_path.publish(self.gt_path)
+        self.gt_path.append(ps)
 
     # ---- ROS -> ArduSub -------------------------------------------------
     def _on_goal(self, msg):
@@ -188,7 +190,8 @@ class GoalBridge(Node):
         echo.pose.position.z = -depth
         self.pub_goal.publish(echo)
 
-        self._gz_goal_markers(p.x, p.y, -depth, yaw_enu)
+        if self.visualize:
+            self._gz_goal_markers(p.x, p.y, -depth, yaw_enu)
 
         self._resend_goal()
 
@@ -249,7 +252,15 @@ def main():
     ap.add_argument('--mavlink', default='udpin:0.0.0.0:14557')
     ap.add_argument('--depth', type=float, default=1.2, help='depth for 2D goals (m)')
     ap.add_argument('--radius', type=float, default=0.3, help='goal reached radius (m)')
+    ap.add_argument('--visualize', choices=('true', 'false'), default='true',
+                    help='enable display paths and Gazebo goal markers (control/TF remain active)')
+    ap.add_argument('--path-max-points', type=int, default=2000,
+                    help='maximum recent points per displayed path')
+    ap.add_argument('--path-rate', type=float, default=2.0,
+                    help='display path publication rate in Hz (pose/TF rate is unchanged)')
     args, ros_args = ap.parse_known_args()
+    if args.path_max_points < 1 or not math.isfinite(args.path_rate) or args.path_rate <= 0:
+        ap.error('--path-max-points and --path-rate must be positive and finite')
 
     rclpy.init(args=['goal_bridge', *ros_args])
     node = GoalBridge(args)

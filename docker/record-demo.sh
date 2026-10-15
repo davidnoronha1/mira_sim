@@ -30,6 +30,9 @@ OUT=${OUT:-recordings/vision_nav_demo.mp4}
 SPEEDUP=${SPEEDUP:-1}
 TIMEOUT=${TIMEOUT:-900}
 VISION_SOURCE=${VISION_SOURCE:-vo}
+VISION_COMPARE=${VISION_COMPARE:-0}
+VISION_PATH_MAX_POINTS=${VISION_PATH_MAX_POINTS:-2000}
+VISION_PATH_RATE=${VISION_PATH_RATE:-2.0}
 VISION_DEPTH=${VISION_DEPTH:-1.2}
 GZ_SERVICE=${GZ_SERVICE:-mira_sim}
 WORLD=${WORLD:-/workspace/worlds/sauvc_competition.world}
@@ -79,9 +82,11 @@ bg_sim gazebo "source /tmp/gz-render-env.sh 2>/dev/null; exec gz sim -v3 -r --gu
 in_sim "until gz topic -l 2>/dev/null | grep -q /sim/front_camera/image; do sleep 1; done"
 bg_sim bridge "exec bash /workspace/vision_nav/bridge.sh"
 in_sim "source /opt/ros/jazzy/setup.bash; until ros2 topic list 2>/dev/null | grep -q /vision/image; do sleep 1; done"
-[ "$VISION_SOURCE" = vo ] && bg_sim vo "exec bash /workspace/vision_nav/vo.sh"
+if [ "$VISION_SOURCE" = vo ] || [ "$VISION_COMPARE" = 1 ]; then
+  bg_sim vo "exec bash /workspace/vision_nav/vo.sh"
+fi
 read -r START_X START_Y <<<"$START_ENU"
-bg_sim nav "exec ros2 launch /workspace/vision_nav/nav.launch.py source:=$VISION_SOURCE start_x:=$START_X start_y:=$START_Y depth:=$VISION_DEPTH"
+bg_sim nav "exec ros2 launch /workspace/vision_nav/nav.launch.py source:=$VISION_SOURCE start_x:=$START_X start_y:=$START_Y depth:=$VISION_DEPTH path_max_points:=$VISION_PATH_MAX_POINTS path_rate:=$VISION_PATH_RATE"
 bg_sim viz "exec ros2 launch /workspace/vision_nav/viz.launch.py world:=$RVIZ_WORLD rviz_config:=/workspace/vision_nav/record.rviz"
 
 wait_log() {  # file, pattern, what

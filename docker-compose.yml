@@ -12,7 +12,7 @@ services:
     tty: true
     # Higher CPU priority - SITL is timing-sensitive (lockstep JSON bridge to Gazebo)
     cpu_shares: 2048
-    cpus: 4
+    cpus: ${MIRA_SITL_CPUS:-4}
     oom_score_adj: -500
     environment:
       - VEHICLE=ArduSub
@@ -89,7 +89,9 @@ services:
     # ipc: host
     # Higher CPU priority - Gazebo + ArduPilot plugin are both CPU-heavy
     cpu_shares: 2048
-    cpus: 6
+    # All Gazebo/vision/GUI processes share this quota. 0 means no hard cap;
+    # retain scheduling weight, but let larger hosts use their spare capacity.
+    cpus: ${MIRA_SIM_CPUS:-0}
     oom_score_adj: -500
     environment:
       - DISPLAY=${DISPLAY}
@@ -170,7 +172,7 @@ services:
     runtime: nvidia
     # ipc: host
     cpu_shares: 2048
-    cpus: 6
+    cpus: ${MIRA_SIM_CPUS:-0}
     oom_score_adj: -500
     environment:
       - DISPLAY=${DISPLAY}

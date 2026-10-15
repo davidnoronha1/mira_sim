@@ -1,0 +1,8 @@
+# SAUVC-only camera; added to the common competition configuration at startup.
+- topic_name: /side_cam
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
+  direction: GZ_TO_ROS
+  lazy: true
+  subscriber_queue: 1
+  publisher_queue: 1

@@ -107,6 +107,13 @@ make record-demo                           # video: Gazebo + RViz, 2D Goal Pose,
 
 Details, frames and tuning: [docs/VISION_NAV.md](./docs/VISION_NAV.md).
 
+For navigation without GUI overhead: `make bringup-vision HEADLESS=1 VISUALIZE=0`.
+Ground-truth runs skip VO unless `VISION_COMPARE=1`. Display paths are bounded
+and rate-limited; camera/cloud bridges only activate when subscribed.
+Gazebo CPU quotas are configurable with `MIRA_SIM_CPUS` (default `0`, unlimited).
+See [efficiency controls](./docs/VISION_NAV.md#efficiency-controls) for settings,
+persistent-container recreation, and regression tests.
+
 ## Troubleshooting
 
 For detailed troubleshooting steps (X11 issues, QGC connection, performance tuning, etc.), see [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md).
@@ -152,3 +159,10 @@ First build takes 30-45 minutes (ArduPilot compilation).
 ## License
 
 Apache License 2.0. See [LICENSE](./LICENSE).
+
+## Integrated Mira packages
+
+Use `make mira-stack-build` then `make bringup-mira` to run the sibling Mira
+checkout's `mira2_vision`, `mira2_hardware`, and single `mira2_actions` demo.
+See [Mira stack integration](docs/MIRA_STACK.md) for model selection, controls,
+headless operation, and how this differs from the standalone VO test rig.

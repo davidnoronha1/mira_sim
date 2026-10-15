@@ -31,14 +31,11 @@ ros2 run tf2_ros static_transform_publisher \
 TF2_PID=$!
 trap 'kill $TF_PID $TF2_PID 2>/dev/null' EXIT
 
-exec ros2 run ros_gz_bridge parameter_bridge \
-  /clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock \
-  /sim/front_camera/image@sensor_msgs/msg/Image[gz.msgs.Image \
-  /sim/front_camera/depth_image@sensor_msgs/msg/Image[gz.msgs.Image \
-  /sim/front_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo \
-  /model/bluerov2_heavy/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry \
-  --ros-args \
-  -r /sim/front_camera/image:=/vision/image \
-  -r /sim/front_camera/depth_image:=/vision/depth \
-  -r /sim/front_camera/camera_info:=/vision/camera_info \
-  -r /model/bluerov2_heavy/odometry:=/vision/gt_odom
+# Keep the shell alive so its EXIT trap also cleans up static TF publishers.
+ros2 run ros_gz_bridge parameter_bridge --ros-args \
+  -p config_file:="$(dirname "$0")/vision_bridge.yaml" &
+BRIDGE_PID=$!
+trap 'kill $TF_PID $TF2_PID $BRIDGE_PID 2>/dev/null || true' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+wait "$BRIDGE_PID"

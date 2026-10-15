@@ -27,7 +27,11 @@ def generate_launch_description():
         DeclareLaunchArgument('start_x', default_value='0', description='AUV start, world east (m)'),
         DeclareLaunchArgument('start_y', default_value='0', description='AUV start, world north (m)'),
         DeclareLaunchArgument('depth', default_value='1.2', description='depth for 2D goals (m)'),
+        DeclareLaunchArgument('visualize', default_value='true', description='display paths/goal markers'),
+        DeclareLaunchArgument('path_max_points', default_value='2000', description='recent points per path'),
+        DeclareLaunchArgument('path_rate', default_value='2.0', description='display path rate (Hz)'),
         script('vision_bridge', '--source', arg('source'), '--start-enu', arg('start_x'), arg('start_y')),
         script('obstacle_distance'),
-        script('goal_bridge', '--depth', arg('depth')),
+        script('goal_bridge', '--depth', arg('depth'), '--visualize', arg('visualize'),
+               '--path-max-points', arg('path_max_points'), '--path-rate', arg('path_rate')),
     ])

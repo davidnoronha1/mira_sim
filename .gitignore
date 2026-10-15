@@ -41,3 +41,6 @@ ardupilot_vision/
 
 # make record-demo output
 recordings/
+
+# Isolated builds of the sibling Mira stack
+.mira-stack/

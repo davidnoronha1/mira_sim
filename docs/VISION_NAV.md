@@ -192,6 +192,73 @@ down so more of the floor texture is in view.
 
 ## Bring-up checklist
 
+### Efficiency controls
+
+The defaults preserve camera resolution/rate, physics, lockstep and pose/TF
+updates, but avoid unnecessary display work:
+
+- Display paths keep the most recent **2,000 points** each and publish at
+  **2 Hz**, only when subscribed. Set `VISION_PATH_MAX_POINTS` and
+  `VISION_PATH_RATE` on `make bringup-vision` or `make record-demo` to change
+  those display-only limits. Complete mission history should be recorded
+  separately (e.g. a rosbag), not kept in the live RViz path.
+- `VISION_SOURCE=gt` no longer starts RTAB-Map. To deliberately run VO for
+  drift comparison while navigating on truth, add `VISION_COMPARE=1`.
+- `VISUALIZE=0` skips RViz, scene markers, path collection/publication and
+  Gazebo goal markers. Goal handling, pose/TF and obstacle avoidance remain
+  active. Combine it with `HEADLESS=1` for no GUI windows:
+
+  ```bash
+  make bringup-vision HEADLESS=1 VISUALIZE=0
+  make bringup-vision VISION_SOURCE=gt VISION_COMPARE=1
+  ```
+
+- Camera/cloud bridges are one-way and lazy: they subscribe to Gazebo only
+  when a ROS consumer needs a stream. Reliable bridge outputs remain
+  compatible with RTAB-Map and RViz defaults, with one-message queues.
+  `/clock` stays non-lazy. The obstacle node accepts reliable or best-effort
+  depth publishers and keeps only one waiting frame; MAVLink obstacle
+  messages are always sent, even when no RViz scan subscriber exists.
+- Gazebo's container no longer has a hard six-CPU quota (`MIRA_SIM_CPUS=0`
+  means unlimited); its scheduling weight is retained. To limit CPU use on
+  shared hosts, set `MIRA_SIM_CPUS=6` (or another quota). SITL's quota remains
+  four by default and can be changed with `MIRA_SITL_CPUS`. These are CPU-time
+  quotas, not core affinity or thread counts.
+
+  Persistent `--no-recreate` containers retain their old quotas. After
+  changing these settings, stop the simulation and explicitly recreate the
+  affected service (no image rebuild needed):
+
+  ```bash
+  MIRA_SIM_CPUS=0 docker compose up -d --force-recreate mira-sim-gpu
+  # For the non-NVIDIA service, use mira_sim instead.
+  ```
+
+For runtime checks while a representative mission is running:
+
+```bash
+docker stats --no-stream
+docker compose exec -T mira-sim-gpu cat /sys/fs/cgroup/cpu.stat
+docker compose exec mira-sim-gpu bash -c 'source /opt/ros/jazzy/setup.bash; ros2 topic hz /vision/vo_odom'
+```
+
+Compare **deltas** of `nr_throttled` / `throttled_usec` in `cpu.stat` over the
+same interval (cgroup v2), plus Gazebo's real-time factor and delivered
+camera/VO rates. Topic-rate probes themselves add subscribers and can activate
+lazy streams. GPU contention from unrelated programs still affects results;
+these changes do not stop or reconfigure other workloads.
+
+Regression tests run without a simulator, SITL or GPU:
+
+```bash
+docker run --rm --network none -e ROS_DOMAIN_ID=173 \
+  -e GZ_PARTITION=mira-efficiency-test \
+  -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
+  -v "$PWD/src/vision_nav:/workspace/vision_nav:ro" \
+  --entrypoint bash ghcr.io/davidnoronha1/mira_sim-gazebo:latest \
+  -c 'source /opt/ros/jazzy/setup.bash; python3 -B -m unittest discover -s /workspace/vision_nav/tests -v'
+```
+
 1. `docker compose build mira-sim-gpu` (the GHCR image lacks rtabmap/pymavlink).
 2. `make bringup-vision VISION_SOURCE=gt`
    - `nav` window (vision_bridge, obstacle_distance, goal_bridge): `EKF origin set`, `Aligned ...`, `sent ~30` per second.

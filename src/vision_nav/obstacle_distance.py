@@ -27,6 +27,7 @@ import rclpy
 from pymavlink import mavutil
 from rclpy.node import Node
 from rclpy.time import Time
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, Image, LaserScan
 from tf2_ros import Buffer, TransformListener
 
@@ -46,9 +47,12 @@ class ObstacleDistance(Node):
         self.sent = 0
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.pub_scan = self.create_publisher(LaserScan, '/vision/obstacles', 10)
-        self.create_subscription(CameraInfo, '/vision/camera_info', self._on_info, 10)
-        self.create_subscription(Image, '/vision/depth', self._on_depth, 10)
+        self.pub_scan = self.create_publisher(LaserScan, '/vision/obstacles', 1)
+        self.create_subscription(CameraInfo, '/vision/camera_info', self._on_info, 1)
+        # Keep only the latest waiting frame. BEST_EFFORT accepts both reliable
+        # bridge publishers and sensor-data publishers without a QoS mismatch.
+        depth_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
+        self.create_subscription(Image, '/vision/depth', self._on_depth, depth_qos)
 
         self.mav = mavutil.mavlink_connection(args.mavlink, source_system=1,
                                               source_component=M.MAV_COMP_ID_OBSTACLE_AVOIDANCE)
@@ -124,6 +128,8 @@ class ObstacleDistance(Node):
 
         # Same data for RViz: LaserScan is counter-clockwise from angle_min,
         # so reverse the clockwise MAVLink sector order.
+        if not self.pub_scan.get_subscription_count():
+            return  # MAVLink above is always sent, even without visualization.
         scan = LaserScan()
         scan.header.stamp = msg.header.stamp
         scan.header.frame_id = 'base_link'
