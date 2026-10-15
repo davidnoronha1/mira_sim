@@ -1,5 +1,7 @@
 <?xml version="1.0" ?>
 <sdf version="1.8">
+  <!-- Label ids feed the front_camera_boxes sensor; names live in mira2_vision
+       config/guided_front.yaml gazebo_boxes.classes (keep both in sync). -->
   <world name="pool_world">
 
     <plugin
@@ -231,12 +233,14 @@
     <!-- Navigation: gate (opening spans x 6.25..7.75), orange flare in front of it -->
     <include>
       <uri>model://gate</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>1</label></plugin>
       <pose>7 0 -2.2 0 0 0</pose>
       <static>1</static>
     </include>
 
     <include>
       <uri>model://orange_flare</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>3</label></plugin>
       <pose>7 -3 -2.2 0 0 0</pose>
       <static>1</static>
     </include>
@@ -244,18 +248,21 @@
     <!-- Target acquisition / re-acquisition: drums on the green mat, golf ball in the blue drum -->
     <include>
       <uri>model://green_mat</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>10</label></plugin>
       <pose>10 10 -2.2 0 0 0</pose>
       <static>1</static>
     </include>
 
     <include>
       <uri>model://blue_drum</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>7</label></plugin>
       <pose>7 10 -2.2 0 0 0</pose>
       <static>1</static>
     </include>
 
     <include>
       <uri>model://red_drum</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>8</label></plugin>
       <name>red_drum0</name>
       <pose>9 10 -2.2 0 0 0</pose>
       <static>1</static>
@@ -263,6 +270,7 @@
 
     <include>
       <uri>model://red_drum</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>8</label></plugin>
       <name>red_drum1</name>
       <pose>11 10 -2.2 0 0 0</pose>
       <static>1</static>
@@ -270,6 +278,7 @@
 
     <include>
       <uri>model://red_drum</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>8</label></plugin>
       <name>red_drum2</name>
       <pose>13 10 -2.2 0 0 0</pose>
       <static>1</static>
@@ -277,6 +286,7 @@
 
     <include>
       <uri>model://golf_ball</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>9</label></plugin>
       <pose>7 10 -2.0 0 0 0</pose>
       <static>1</static>
     </include>
@@ -284,18 +294,21 @@
     <!-- Communication / localisation flares -->
     <include>
       <uri>model://yellow_flare</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>5</label></plugin>
       <pose>20 5 -2.2 0 0 0</pose>
       <static>1</static>
     </include>
 
     <include>
       <uri>model://blue_flare</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>6</label></plugin>
       <pose>19.8 4 -2.2 0 0 0</pose>
       <static>1</static>
     </include>
 
     <include>
       <uri>model://red_flare</uri>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label"><label>4</label></plugin>
       <pose>19.6 3 -2.2 0 0 0</pose>
       <static>1</static>
     </include>
