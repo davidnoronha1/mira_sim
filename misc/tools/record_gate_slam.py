@@ -39,6 +39,7 @@ CHASE = (slice(90, 619), slice(20, 960))
 MAP = (slice(90, 560), slice(980, 1900))
 BOTTOM_W, BOTTOM_H = 455, 341
 BOTTOM_TOP = 680
+OUTPUT_FPS = 15
 BOTTOM = [(slice(BOTTOM_TOP, BOTTOM_TOP+BOTTOM_H), slice(20+i*475, 20+i*475+BOTTOM_W)) for i in range(4)]
 TITLES = [('THIRD PERSON / Gazebo chase camera on the vehicle', (20, 78)),
           ('cuVSLAM SLAM MAP / registered depth at optimized keyframe poses', (980, 78)),
@@ -376,10 +377,11 @@ def main():
                 writer.write(canvas)
                 video_stamps.append(stamp(data['rgb']))
                 video_phases.append(phase)
-                cv2.imwrite(str(out/'depth.png'), depth_rgb)
-                cv2.imwrite(str(out/'third_person.png'), canvas[CHASE])
+                last_depth, last_chase = depth_rgb, canvas[CHASE].copy()
             writer.release()
             writer = None
+            cv2.imwrite(str(out/'depth.png'), last_depth)
+            cv2.imwrite(str(out/'third_person.png'), last_chase)
             # Freeze the captured input set before running the benchmark.
             dataset, gt = frames[:], truth[:]
             frames.clear()
@@ -577,19 +579,31 @@ def main():
         cv2.imwrite(str(out/'map.png'), cloud_view(cloud, map_bounds))
         with (out/'map_snapshots.pkl').open('wb') as stream:
             pickle.dump(clouds, stream)
+        # Capture frames are irregular in wall time (the recorder shares its thread
+        # with RGB-D serialisation and 1 kHz IMU). Re-time them by simulation
+        # stamp at a fixed rate so motion plays at constant speed: a stall
+        # becomes a short hold instead of a jump.
         reader = cv2.VideoCapture(str(out/'capture.mp4'))
-        writer = cv2.VideoWriter(str(out/'composite.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), 10, (1920, 1080))
-        snapshot = 0
-        for i, s in enumerate(video_stamps):
-            ok, canvas = reader.read()
-            if not ok:
-                break
+        count = min(int(reader.get(cv2.CAP_PROP_FRAME_COUNT)), len(video_stamps))
+        stamps = np.asarray(video_stamps[:count], np.int64)
+        writer = cv2.VideoWriter(str(out/'composite.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), OUTPUT_FPS, (1920, 1080))
+        snapshot, index, frame = 0, -1, None
+        ticks = np.arange(stamps[0], stamps[-1], int(1e9/OUTPUT_FPS)) if count else []
+        for i, s in enumerate(ticks):
+            # Latest captured frame at or before this simulation time; ticks only advance.
+            wanted = int(np.searchsorted(stamps, s, side='right'))-1
+            while index < wanted:
+                ok, frame = reader.read()
+                if not ok:
+                    break
+                index += 1
+            canvas = frame.copy()
             while snapshot+1 < len(clouds) and clouds[snapshot+1][0] <= s:
                 snapshot += 1
             points = clouds[snapshot][1] if clouds and clouds[snapshot][0] <= s else None
             canvas[MAP] = cloud_view(points, map_bounds)
             writer.write(canvas)
-            if i == len(video_stamps)-15:
+            if i == len(ticks)-15:
                 cv2.imwrite(str(out/'gate_demo.jpg'), canvas)
         reader.release()
         writer.release()
