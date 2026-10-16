@@ -20,21 +20,21 @@ class DepthYawVisionController(Node):
         # -------------------- Publishers --------------------
         self.thruster_pub = self.create_publisher(
             Float64MultiArray,
-            '/bluerov2/thrusters',
+            '/mira/sim/thrusters',
             10
         )
 
         # -------------------- Subscribers --------------------
         self.odom_sub = self.create_subscription(
             Odometry,
-            '/bluerov2/odometry',
+            '/mira/sim/ground_truth/odom',
             self.odom_cb,
             10
         )
 
         self.image_sub = self.create_subscription(
             Image,
-            '/bluerov2/left/image_color',
+            '/mira/sensors/camera/front/image_raw',
             self.image_cb,
             10
         )

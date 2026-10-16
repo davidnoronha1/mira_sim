@@ -1,4 +1,4 @@
-"""Log EKF horizontal speed (from /vision/ekf_pose) against truth while idle.
+"""Log EKF horizontal speed (from /mira/state/pose) against truth while idle.
 
 Usage: python3 ekf_settle.py SECONDS
 Every 2 s: seconds since the first EKF pose, EKF speed, true speed, EKF and true roll/pitch.
@@ -22,11 +22,11 @@ def roll_pitch(q):
     return Rotation.from_quat([q.x, q.y, q.z, q.w]).as_euler('ZYX', degrees=True)[[2, 1]]
 
 
-node.create_subscription(PoseStamped, '/vision/ekf_attitude', lambda m: tilt.update(ekf=roll_pitch(m.pose.orientation)), 10)
-node.create_subscription(Odometry, '/vision/gt_odom', lambda m: tilt.update(truth=roll_pitch(m.pose.pose.orientation)), 10)
-node.create_subscription(PoseStamped, '/vision/ekf_pose',
+node.create_subscription(PoseStamped, '/mira/state/attitude', lambda m: tilt.update(ekf=roll_pitch(m.pose.orientation)), 10)
+node.create_subscription(Odometry, '/mira/sim/ground_truth/odom', lambda m: tilt.update(truth=roll_pitch(m.pose.pose.orientation)), 10)
+node.create_subscription(PoseStamped, '/mira/state/pose',
                          lambda m: ekf.append((time.monotonic(), m.pose.position.x, m.pose.position.y)), 10)
-node.create_subscription(Odometry, '/vision/gt_odom',
+node.create_subscription(Odometry, '/mira/sim/ground_truth/odom',
                          lambda m: truth.append((time.monotonic(), m.pose.pose.position.x, m.pose.pose.position.y)), 10)
 
 

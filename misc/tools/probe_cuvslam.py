@@ -36,9 +36,9 @@ def main():
         while len(cache) > 20:
             cache.popitem(last=False)
 
-    node.create_subscription(Image, '/vision/image', lambda m: receive(m, images), qos_profile_sensor_data)
-    node.create_subscription(Image, '/vision/depth', lambda m: receive(m, depths), qos_profile_sensor_data)
-    node.create_subscription(CameraInfo, '/vision/camera_info', lambda m: calibration.append(m), qos_profile_sensor_data)
+    node.create_subscription(Image, '/mira/sensors/camera/front/image_raw', lambda m: receive(m, images), qos_profile_sensor_data)
+    node.create_subscription(Image, '/mira/sensors/camera/front/depth/image_raw', lambda m: receive(m, depths), qos_profile_sensor_data)
+    node.create_subscription(CameraInfo, '/mira/sensors/camera/front/camera_info', lambda m: calibration.append(m), qos_profile_sensor_data)
     deadline = time.monotonic() + 30
     while (len(frames) < 90 or not calibration) and time.monotonic() < deadline:
         rclpy.spin_once(node, timeout_sec=.1)

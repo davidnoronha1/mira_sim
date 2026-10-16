@@ -16,7 +16,7 @@ class MissionScript(Node):
 
         self.pub = self.create_publisher(
             Float64MultiArray,
-            '/motion_command',
+            '/mira/sim/motion_command',
             10
         )
 

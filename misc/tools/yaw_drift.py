@@ -21,9 +21,9 @@ def yaw(q):
     return Rotation.from_quat([q.x, q.y, q.z, q.w]).as_euler('ZYX')[0]
 
 
-node.create_subscription(PoseStamped, '/vision/ekf_attitude', lambda m: state.update(ekf=yaw(m.pose.orientation)), 10)
-node.create_subscription(Odometry, '/vision/gt_odom', lambda m: state.update(gt=yaw(m.pose.pose.orientation)), 10)
-node.create_subscription(PoseWithCovarianceStamped, '/mira/perception/bottom/floor_heading',
+node.create_subscription(PoseStamped, '/mira/state/attitude', lambda m: state.update(ekf=yaw(m.pose.orientation)), 10)
+node.create_subscription(Odometry, '/mira/sim/ground_truth/odom', lambda m: state.update(gt=yaw(m.pose.pose.orientation)), 10)
+node.create_subscription(PoseWithCovarianceStamped, '/mira/odometry/floor_heading',
                          lambda m: state.update(headings=state['headings'] + 1), 10)
 end, next_print, errors = time.monotonic() + float(sys.argv[1]), time.monotonic() + 5, []
 while time.monotonic() < end:

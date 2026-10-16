@@ -8,13 +8,13 @@ class MotionController(Node):
 
         self.thruster_pub = self.create_publisher(
             Float64MultiArray,
-            '/bluerov2/thrusters',
+            '/mira/sim/thrusters',
             10
         )
 
         self.command_sub = self.create_subscription(
             Float64MultiArray,
-            '/motion_command',
+            '/mira/sim/motion_command',
             self.command_callback,
             10
         )

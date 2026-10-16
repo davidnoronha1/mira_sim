@@ -1,3 +1,6 @@
+# ROS names follow the Mira topic schema (mira2 utils/topics.py): sensors are
+# published under the same /mira/sensors names as the vehicle drivers, so the
+# stack runs unchanged; simulator-only data lives under /mira/sim.
 # Reliable output preserves compatibility with RTAB-Map/RViz defaults. Small
 # queues bound buffering; lazy streams only subscribe to Gazebo when needed.
 - topic_name: /clock
@@ -7,7 +10,7 @@
   lazy: false
   subscriber_queue: 1
   publisher_queue: 1
-- ros_topic_name: /vision/image
+- ros_topic_name: /mira/sensors/camera/front/image_raw
   gz_topic_name: /sim/front_camera/image
   ros_type_name: sensor_msgs/msg/Image
   gz_type_name: gz.msgs.Image
@@ -15,7 +18,7 @@
   lazy: true
   subscriber_queue: 1
   publisher_queue: 1
-- ros_topic_name: /vision/depth
+- ros_topic_name: /mira/sensors/camera/front/depth/image_raw
   gz_topic_name: /sim/front_camera/depth_image
   ros_type_name: sensor_msgs/msg/Image
   gz_type_name: gz.msgs.Image
@@ -23,7 +26,7 @@
   lazy: true
   subscriber_queue: 1
   publisher_queue: 1
-- ros_topic_name: /vision/camera_info
+- ros_topic_name: /mira/sensors/camera/front/camera_info
   gz_topic_name: /sim/front_camera/camera_info
   ros_type_name: sensor_msgs/msg/CameraInfo
   gz_type_name: gz.msgs.CameraInfo
@@ -31,7 +34,7 @@
   lazy: true
   subscriber_queue: 1
   publisher_queue: 1
-- ros_topic_name: /vision/gt_odom
+- ros_topic_name: /mira/sim/ground_truth/odom
   gz_topic_name: /model/bluerov2_heavy/odometry
   ros_type_name: nav_msgs/msg/Odometry
   gz_type_name: gz.msgs.Odometry
@@ -39,7 +42,7 @@
   lazy: true
   subscriber_queue: 1
   publisher_queue: 1
-- ros_topic_name: /vision/boxes
+- ros_topic_name: /mira/sim/camera/front/boxes
   gz_topic_name: /sim/front_camera/boxes
   ros_type_name: vision_msgs/msg/Detection2DArray
   gz_type_name: gz.msgs.AnnotatedAxisAligned2DBox_V
@@ -49,7 +52,7 @@
   publisher_queue: 1
 # 1 kHz FRD IMU (the same sensor ArduSub flies on) for visual-inertial odometry.
 # Deeper queues: dropped IMU samples break cuVSLAM's preintegration.
-- ros_topic_name: /vision/imu
+- ros_topic_name: /mira/sensors/imu
   gz_topic_name: /world/pool_world/model/bluerov2_heavy/link/base_link/sensor/imu_sensor/imu
   ros_type_name: sensor_msgs/msg/Imu
   gz_type_name: gz.msgs.IMU
@@ -58,17 +61,17 @@
   subscriber_queue: 100
   publisher_queue: 100
 # Downward camera (model.sdf bottom_camera) for optical-flow velocity. Gazebo
-# publishes its info on the bare /camera_info (topic has no parent namespace).
-- ros_topic_name: /vision/bottom/image
-  gz_topic_name: /bottom_camera
+# publishes its info next to the image topic.
+- ros_topic_name: /mira/sensors/camera/bottom/image_raw
+  gz_topic_name: /sim/bottom_camera/image
   ros_type_name: sensor_msgs/msg/Image
   gz_type_name: gz.msgs.Image
   direction: GZ_TO_ROS
   lazy: true
   subscriber_queue: 1
   publisher_queue: 1
-- ros_topic_name: /vision/bottom/camera_info
-  gz_topic_name: /camera_info
+- ros_topic_name: /mira/sensors/camera/bottom/camera_info
+  gz_topic_name: /sim/bottom_camera/camera_info
   ros_type_name: sensor_msgs/msg/CameraInfo
   gz_type_name: gz.msgs.CameraInfo
   direction: GZ_TO_ROS

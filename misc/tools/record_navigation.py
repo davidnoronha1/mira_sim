@@ -55,13 +55,13 @@ def main():
                     x, z = a[1]+f*(b[1]-a[1]), a[3]+f*(b[3]-a[3])
                     data['gate_passed'] = 6.56 < x < 7.44 and -2.05 < z < -.85
 
-    node.create_subscription(Image, '/vision/image', image, qos_profile_sensor_data)
+    node.create_subscription(Image, '/mira/sensors/camera/front/image_raw', image, qos_profile_sensor_data)
     node.create_subscription(Detection2DArray, '/mira/perception/front/objects',
                              lambda m: data.update(boxes=m), qos_profile_sensor_data)
-    node.create_subscription(PoseStamped, '/vision/ekf_pose', lambda m: pose('ekf', m), 10)
-    node.create_subscription(Odometry, '/vision/gt_odom', lambda m: pose('truth', m), 10)
-    node.create_subscription(Odometry, '/vision/vo_odom', lambda m: data.update(vo=m), 10)
-    node.create_subscription(PoseStamped, '/goal_pose', lambda m: data.update(goal=m.pose), 10)
+    node.create_subscription(PoseStamped, '/mira/state/pose', lambda m: pose('ekf', m), 10)
+    node.create_subscription(Odometry, '/mira/sim/ground_truth/odom', lambda m: pose('truth', m), 10)
+    node.create_subscription(Odometry, '/mira/odometry/visual', lambda m: data.update(vo=m), 10)
+    node.create_subscription(PoseStamped, '/mira/guidance/goal', lambda m: data.update(goal=m.pose), 10)
     def scan(msg):
         data['scan'] = msg
         data['scan_samples'] = data.get('scan_samples', 0)+1

@@ -39,13 +39,13 @@ class ActionsTest(unittest.TestCase):
     def exercise(self, mode):
         node = rclpy.create_node('actions_test')
         objects = node.create_publisher(Detection2DArray, '/mira/perception/front/objects', qos_profile_sensor_data)
-        feedback = node.create_publisher(PoseStamped, '/vision/ekf_pose', 10)
+        feedback = node.create_publisher(PoseStamped, '/mira/state/pose', 10)
         broadcaster = (StaticTransformBroadcaster(node) if mode in ('continuous', 'continuous_outlier', 'gate_cancel', 'gate_stale', 'scan', 'scan_cancel')
                        else TransformBroadcaster(node))
         goals, holds = [], []
-        node.create_subscription(PoseStamped, '/goal_pose', goals.append, 10)
+        node.create_subscription(PoseStamped, '/mira/guidance/goal', goals.append, 10)
         # Gate crossings use the direct (no-OA) line; record them in the same order.
-        node.create_subscription(PoseStamped, '/goal_pose_direct', goals.append, 10)
+        node.create_subscription(PoseStamped, '/mira/guidance/goal_direct', goals.append, 10)
 
         def hold(request, response):
             holds.append(True)

@@ -29,8 +29,8 @@ def on_image(m):
     state['n'] += 1
 
 
-node.create_subscription(CameraInfo, '/vision/bottom/camera_info', on_info, 10)
-node.create_subscription(Image, '/vision/bottom/image', on_image, qos_profile_sensor_data)
+node.create_subscription(CameraInfo, '/mira/sensors/camera/bottom/camera_info', on_info, 10)
+node.create_subscription(Image, '/mira/sensors/camera/bottom/image_raw', on_image, qos_profile_sensor_data)
 while rclpy.ok() and state['n'] < count:
     rclpy.spin_once(node, timeout_sec=0.5)
 np.save(f'{out}/K.npy', state['K'])

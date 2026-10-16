@@ -36,7 +36,7 @@ from mira2_vision.cuvslam_odometry import CuVslamOdometry
 OBSERVER = '''<sdf version="1.9"><model name="gate_demo_observer">
 <static>true</static><pose>12 -5 4 0 0.7853981634 3.1415926536</pose><link name="camera">
 <sensor name="observer" type="camera"><always_on>true</always_on>
-<update_rate>5</update_rate><topic>/demo/third_person</topic><camera>
+<update_rate>5</update_rate><topic>/mira/sim/demo/third_person</topic><camera>
 <horizontal_fov>1.6</horizontal_fov><image><width>640</width><height>480</height>
 <format>R8G8B8</format></image><clip><near>0.1</near><far>80</far></clip>
 </camera></sensor></link></model></sdf>'''
@@ -251,11 +251,11 @@ def main():
         if all(math.isfinite(v) and v < 9999 for v in msg.pose.covariance[::7]):
             estimates[key][stamp(msg)] = pose_row(msg)
 
-    node.create_subscription(Image, '/vision/image', lambda m: receive(m, 'rgb'), qos_profile_sensor_data)
-    node.create_subscription(Image, '/vision/depth', lambda m: receive(m, 'depth'), qos_profile_sensor_data)
-    node.create_subscription(CameraInfo, '/vision/camera_info', lambda m: receive(m, 'info'), qos_profile_sensor_data)
-    node.create_subscription(Image, '/demo/third_person', lambda m: receive(m, 'third'), qos_profile_sensor_data)
-    node.create_subscription(Odometry, '/vision/vo_odom', lambda m: receive(m, 'live_vo'), 10)
+    node.create_subscription(Image, '/mira/sensors/camera/front/image_raw', lambda m: receive(m, 'rgb'), qos_profile_sensor_data)
+    node.create_subscription(Image, '/mira/sensors/camera/front/depth/image_raw', lambda m: receive(m, 'depth'), qos_profile_sensor_data)
+    node.create_subscription(CameraInfo, '/mira/sensors/camera/front/camera_info', lambda m: receive(m, 'info'), qos_profile_sensor_data)
+    node.create_subscription(Image, '/mira/sim/demo/third_person', lambda m: receive(m, 'third'), qos_profile_sensor_data)
+    node.create_subscription(Odometry, '/mira/odometry/visual', lambda m: receive(m, 'live_vo'), 10)
     def ground_truth(m):
         truth.append(pose_row(m))
         v = m.twist.twist.linear  # body frame
@@ -265,16 +265,16 @@ def main():
         gray = cv2.cvtColor(bridge.imgmsg_to_cv2(m, desired_encoding='bgr8'), cv2.COLOR_BGR2GRAY)
         bottom['previous'], bottom['current'] = bottom.get('current'), cv2.resize(gray, (320, 240))
 
-    node.create_subscription(Odometry, '/vision/gt_odom', ground_truth, 100)
-    node.create_subscription(Image, '/vision/bottom/image', bottom_image, qos_profile_sensor_data)
-    node.create_subscription(TwistWithCovarianceStamped, '/vision/flow_velocity', lambda m: flow_rows.append(
+    node.create_subscription(Odometry, '/mira/sim/ground_truth/odom', ground_truth, 100)
+    node.create_subscription(Image, '/mira/sensors/camera/bottom/image_raw', bottom_image, qos_profile_sensor_data)
+    node.create_subscription(TwistWithCovarianceStamped, '/mira/odometry/flow_velocity', lambda m: flow_rows.append(
         (stamp(m)*1e-9, m.twist.twist.linear.x, m.twist.twist.linear.y)), 50)
     # Same 1 kHz IMU the live odometry fuses; replayed for a with/without-IMU comparison.
-    node.create_subscription(Imu, '/vision/imu', lambda m: imu.append(
+    node.create_subscription(Imu, '/mira/sensors/imu', lambda m: imu.append(
         (stamp(m), m.header.frame_id, (m.linear_acceleration.x, m.linear_acceleration.y, m.linear_acceleration.z),
          (m.angular_velocity.x, m.angular_velocity.y, m.angular_velocity.z))), 1000)
     node.create_subscription(Detection2DArray, '/mira/perception/front/objects', lambda m: receive(m, 'boxes'), 10)
-    node.create_subscription(Odometry, '/demo/cuvslam', lambda m: odometry(m, 'cuvslam'), 100)
+    node.create_subscription(Odometry, '/mira/replay/cuvslam', lambda m: odometry(m, 'cuvslam'), 100)
     gate = None
     recorded_extrinsics = None
     try:
@@ -289,7 +289,7 @@ def main():
                             '--reqtype', 'gz.msgs.EntityFactory', '--reptype', 'gz.msgs.Boolean',
                             '--timeout', '5000', '--req', f'sdf_filename: "{sdf_path}"'], check=True)
             start(['ros2', 'run', 'ros_gz_bridge', 'parameter_bridge',
-                   '/demo/third_person@sensor_msgs/msg/Image[gz.msgs.Image'], 'observer_bridge')
+                   '/mira/sim/demo/third_person@sensor_msgs/msg/Image[gz.msgs.Image'], 'observer_bridge')
             deadline = time.monotonic()+60
             while not all(k in data for k in ('rgb', 'depth', 'info', 'third', 'boxes', 'live_vo')) or not truth or data['live_vo'].pose.covariance[0] >= 1000:
                 spin(.1)
@@ -386,17 +386,17 @@ def main():
         print(f'CAPTURE complete: {len(dataset)} matched RGB-D frames; replaying cuVSLAM SLAM', flush=True)
         # Remove live input subscriptions: replay consumes exactly the recorded set.
         for sub in list(node.subscriptions):
-            if sub.topic_name in ('/vision/image', '/vision/depth', '/vision/camera_info',
-                                  '/vision/gt_odom', '/vision/vo_odom', '/vision/imu', '/demo/third_person',
-                                  '/mira/perception/front/objects', '/vision/bottom/image',
-                                  '/vision/flow_velocity'):
+            if sub.topic_name in ('/mira/sensors/camera/front/image_raw', '/mira/sensors/camera/front/depth/image_raw', '/mira/sensors/camera/front/camera_info',
+                                  '/mira/sim/ground_truth/odom', '/mira/odometry/visual', '/mira/sensors/imu', '/mira/sim/demo/third_person',
+                                  '/mira/perception/front/objects', '/mira/sensors/camera/bottom/image_raw',
+                                  '/mira/odometry/flow_velocity'):
                 node.destroy_subscription(sub)
 
         def replay(topic, use_imu, slam):
             """Replay the recorded frames (and IMU, when requested) through cuVSLAM."""
             imu_frame = imu_samples[-1][1] if use_imu else ''
             cu = CuVslamOdometry(node, topic, max_depth=8, odom_frame='demo_cu_odom', enable_slam=slam,
-                                 tracking_mode='multisensor', imu_topic='/demo/replay_imu' if use_imu else '',
+                                 tracking_mode='multisensor', imu_topic='/mira/replay/imu' if use_imu else '',
                                  imu_frame=imu_frame)
             if recorded_extrinsics is not None:
                 cu.tf_buffer.set_transform_static(deserialize_message(recorded_extrinsics, TransformStamped), 'recording')
@@ -432,7 +432,7 @@ def main():
         have_imu = bool(imu_samples) and imu_extrinsics is not None
         # Primary replay matches the live configuration (IMU fused when recorded)
         # and produces the map; the comparison replay drops the IMU on the same frames.
-        cu, cu_times = replay('/demo/cuvslam', have_imu, True)
+        cu, cu_times = replay('/mira/replay/cuvslam', have_imu, True)
         optimized = {int(p.timestamp_ns): p.pose for p in cu.tracker.get_all_slam_poses()}
         saved_map = []
         save_done = threading.Event()
@@ -476,8 +476,8 @@ def main():
         comparison = None
         if have_imu:
             estimates['rgbd_only'], received['rgbd_only'] = {}, set()
-            node.create_subscription(Odometry, '/demo/cuvslam_rgbd', lambda m: odometry(m, 'rgbd_only'), 100)
-            comparison, _ = replay('/demo/cuvslam_rgbd', False, False)
+            node.create_subscription(Odometry, '/mira/replay/cuvslam_rgbd', lambda m: odometry(m, 'rgbd_only'), 100)
+            comparison, _ = replay('/mira/replay/cuvslam_rgbd', False, False)
             comparison.close()
         result = {'backend': 'cuVSLAM only', 'tracking_mode': cu.tracking_mode,
                   'scan': {name: getattr(args, 'scan_'+name) for name in ('radius', 'sweep', 'step', 'depth')}, 'input_frames': len(dataset),

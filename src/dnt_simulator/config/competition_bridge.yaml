@@ -21,7 +21,8 @@
   lazy: true
   subscriber_queue: 1
   publisher_queue: 1
-- topic_name: /bottom_camera
+- ros_topic_name: /bottom_camera
+  gz_topic_name: /sim/bottom_camera/image
   ros_type_name: sensor_msgs/msg/Image
   gz_type_name: gz.msgs.Image
   direction: GZ_TO_ROS

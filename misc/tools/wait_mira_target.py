@@ -53,7 +53,7 @@ def main():
         _, x, y = track[-1]
         return all(math.isfinite(v) for v in (x, y)) and max(math.hypot(a - x, b - y) for _, a, b in track) < SETTLE_M
     node.create_subscription(Detection2DArray, '/mira/perception/front/objects', detections, qos_profile_sensor_data)
-    node.create_subscription(PoseStamped, '/vision/ekf_pose', pose, qos_profile_sensor_data)
+    node.create_subscription(PoseStamped, '/mira/state/pose', pose, qos_profile_sensor_data)
     def fresh(header):
         if header is None:
             return False

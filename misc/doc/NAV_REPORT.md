@@ -31,10 +31,10 @@ It grew into:
                                   |
         +-------------------------+--------------------------+
         |                                                    |
-  /vision/image + /vision/depth                       /vision/depth
+  /mira/sensors/camera/front/image_raw + /mira/sensors/camera/front/depth/image_raw                       /mira/sensors/camera/front/depth/image_raw
         |                                                    |
   RTAB-Map rgbd_odometry (vo.sh)                obstacle_distance.py
-        |  /vision/vo_odom                        (72 sectors, +/-0.25 m band)
+        |  /mira/odometry/visual                        (72 sectors, +/-0.25 m band)
         |                                                    |
   vision_bridge.py                                 MAVLink OBSTACLE_DISTANCE
   (FLU->NED, start offset, heading align)                udp 14558
@@ -52,7 +52,7 @@ It grew into:
                                  scene_markers.py -> world + AUV meshes in RViz
 ```
 
-Ground truth from Gazebo (`/vision/gt_odom`) **never reaches ArduSub** in the default mode. It is only drawn in RViz (the green ghost AUV and the green path) and used by `compare_odom.py` to measure drift.
+Ground truth from Gazebo (`/mira/sim/ground_truth/odom`) **never reaches ArduSub** in the default mode. It is only drawn in RViz (the green ghost AUV and the green path) and used by `compare_odom.py` to measure drift.
 
 ## 3. What was built, in order
 

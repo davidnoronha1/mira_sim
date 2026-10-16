@@ -55,21 +55,21 @@ def main():
         rows['obstacles'].append([msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9,
                                   near[0], near[1], r[len(r)//2][0]])
 
-    node.create_subscription(TwistWithCovarianceStamped, '/vision/flow_velocity', lambda m: rows['flow'].append(
+    node.create_subscription(TwistWithCovarianceStamped, '/mira/odometry/flow_velocity', lambda m: rows['flow'].append(
         [m.header.stamp.sec+m.header.stamp.nanosec*1e-9, m.twist.twist.linear.x, m.twist.twist.linear.y,
          m.twist.covariance[0]]), 50)
     node.create_subscription(LaserScan, '/mira/perception/front/obstacles', obstacles, 10)
-    for topic, key, cls in [('/vision/gt_odom', 'truth', Odometry),
-                             ('/vision/vo_odom', 'vo', Odometry),
-                             ('/vision/ekf_pose', 'ekf', PoseStamped),
-                             ('/goal_pose', 'goals', PoseStamped)]:
+    for topic, key, cls in [('/mira/sim/ground_truth/odom', 'truth', Odometry),
+                             ('/mira/odometry/visual', 'vo', Odometry),
+                             ('/mira/state/pose', 'ekf', PoseStamped),
+                             ('/mira/guidance/goal', 'goals', PoseStamped)]:
         node.create_subscription(cls, topic, lambda m, k=key: record(k, m), 100)
     node.create_subscription(Detection2DArray, '/mira/perception/front/objects', objects, 10)
     deadline = time.monotonic()+60
     # This tool itself subscribes to goals. Wait for the real controller too;
     # its own subscription must not make the BT believe control is ready.
     while (not all(rows[k] for k in ('truth', 'ekf')) or
-           node.count_subscribers('/goal_pose') < 2):
+           node.count_subscribers('/mira/guidance/goal') < 2):
         rclpy.spin_once(node, timeout_sec=.05)
         if time.monotonic() > deadline:
             raise RuntimeError('Missing navigation telemetry')
