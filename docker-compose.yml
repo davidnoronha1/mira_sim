@@ -107,6 +107,8 @@ services:
       - DISPLAY=${DISPLAY}
       - XAUTHORITY=/tmp/.docker.xauth
       - QT_X11_NO_MITSHM=1
+      # Host UIDs without an image passwd entry get HOME=/; ROS/gz logs need a writable home.
+      - HOME=/tmp
       # GZ_SIM_SYSTEM_PLUGIN_PATH/GZ_SIM_RESOURCE_PATH are also set in the
       # image, but re-declared here so `docker compose exec` / non-interactive
       # shells inherit them. Extends the baked bluerov2_gz models/worlds
@@ -188,6 +190,8 @@ services:
       - DISPLAY=${DISPLAY}
       - XAUTHORITY=/tmp/.docker.xauth
       - QT_X11_NO_MITSHM=1
+      # Host UIDs without an image passwd entry get HOME=/; ROS/gz logs need a writable home.
+      - HOME=/tmp
       - GZ_SIM_SYSTEM_PLUGIN_PATH=/workspace/ardupilot_gazebo/build
       - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/tacc_sim/models:/workspace/tacc_sim/worlds:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/sauvc_sim/meshes:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
       - GZ_CONFIG_PATH=/usr/share/gz:/opt/ros/jazzy/opt/gz_sim_vendor/share/gz:/opt/ros/jazzy/opt/gz_transport_vendor/share/gz
