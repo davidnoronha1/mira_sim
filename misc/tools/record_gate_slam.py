@@ -33,13 +33,19 @@ from tf2_ros import Buffer, TransformListener
 from mira2_vision.cuvslam_odometry import CuVslamOdometry
 
 
-OBSERVER = '''<sdf version="1.9"><model name="gate_demo_observer">
-<static>true</static><pose>12 -5 4 0 0.7853981634 3.1415926536</pose><link name="camera">
-<sensor name="observer" type="camera"><always_on>true</always_on>
-<update_rate>5</update_rate><topic>/mira/sim/demo/third_person</topic><camera>
-<horizontal_fov>1.6</horizontal_fov><image><width>640</width><height>480</height>
-<format>R8G8B8</format></image><clip><near>0.1</near><far>80</far></clip>
-</camera></sensor></link></model></sdf>'''
+# 1920x1080 composite: third-person view and SLAM map on top; onboard RGB,
+# depth, bottom camera and the route below. (rows, columns) per panel.
+CHASE = (slice(90, 619), slice(20, 960))
+MAP = (slice(90, 560), slice(980, 1900))
+BOTTOM_W, BOTTOM_H = 455, 341
+BOTTOM_TOP = 680
+BOTTOM = [(slice(BOTTOM_TOP, BOTTOM_TOP+BOTTOM_H), slice(20+i*475, 20+i*475+BOTTOM_W)) for i in range(4)]
+TITLES = [('THIRD PERSON / Gazebo chase camera on the vehicle', (20, 78)),
+          ('cuVSLAM SLAM MAP / registered depth at optimized keyframe poses', (980, 78)),
+          ('ONBOARD RGB / detections', (20, BOTTOM_TOP-12)),
+          ('REGISTERED DEPTH / 0-8 m', (495, BOTTOM_TOP-12)),
+          ('BOTTOM CAMERA / floor tracks', (970, BOTTOM_TOP-12)),
+          ('ROUTE / top view, metres', (1445, BOTTOM_TOP-12))]
 
 
 def stamp(message):
@@ -102,7 +108,7 @@ def flow_panel(previous, current, flow, truth_velocity):
     view = cv2.resize(view, (PANEL_W, 450))
     cv2.rectangle(view, (0, 380), (PANEL_W, 450), (20, 18, 14), -1)
     if flow is None:
-        label(view, 'optical flow off (SLAM_OPTICAL_FLOW_ENABLED=0)', (12, 420), .6)
+        label(view, 'optical flow off (slam_optical_flow:=false)', (12, 420), .6)
     else:
         label(view, f'flow   fwd {flow[1]:+.2f}  left {flow[2]:+.2f} m/s', (12, 405), .6, (120, 235, 150))
         if truth_velocity is not None:
@@ -134,22 +140,37 @@ def speed_plot(flow, truth, now, window=20.0):
     return canvas
 
 
-def observer_crop(image, position):
-    # Crop an actual rendered image around the vehicle and gate; truth is only
-    # used for the demo camera framing, never by the navigation routine.
-    camera = Rotation.from_euler('xyz', [0, np.pi/4, np.pi])
-    targets = np.array([position, [7, 0, -1.35], [7, 0, -.5]])
-    local = camera.inv().apply(targets-np.array([12, -5, 4]))
-    focal = image.shape[1]/(2*np.tan(1.6/2))
-    pixels = np.column_stack((image.shape[1]/2-focal*local[:, 1]/local[:, 0],
-                              image.shape[0]/2-focal*local[:, 2]/local[:, 0]))
-    cx, cy = (pixels.min(axis=0)+pixels.max(axis=0))/2
-    width = min(image.shape[1], max(440, np.ptp(pixels[:, 0])+220,
-                                      (np.ptp(pixels[:, 1])+160)*920/450))
-    height = min(image.shape[0], width*450/920)
-    left = int(np.clip(cx-width/2, 0, image.shape[1]-width))
-    top = int(np.clip(cy-height/2, 0, image.shape[0]-height))
-    return image[top:top+int(height), left:left+int(width)]
+def route_view(truth, ekf, goal):
+    """Top view of the pass: Gazebo truth (verification) against the EKF the vehicle flew on."""
+    canvas = np.full((BOTTOM_H, BOTTOM_W, 3), (25, 22, 18), np.uint8)
+    scale = 26  # px per metre; y (along the course) runs left to right
+    px = lambda x, y: (int(20 + (y+12)*scale), int(BOTTOM_H/2 + (x-7)*scale))
+    for y in range(-12, 4, 2):
+        cv2.line(canvas, px(-20, y), px(20, y), (45, 42, 38), 1)
+        label(canvas, f'{y}', (px(0, y)[0]-6, BOTTOM_H-8), .4, (130, 130, 130))
+    for x in range(1, 14, 2):
+        cv2.line(canvas, px(x, -20), px(x, 20), (45, 42, 38), 1)
+    ring = [px(6.3, -10.7), px(7.7, -9.3)]
+    cv2.rectangle(canvas, ring[0], ring[1], (210, 210, 210), 1)
+    cv2.circle(canvas, px(7, -3), 4, (0, 120, 255), -1)
+    label(canvas, 'flare', (px(7, -3)[0]-16, px(7, -3)[1]-10), .45, (0, 160, 255))
+    cv2.line(canvas, px(6.25, 0), px(7.75, 0), (200, 200, 200), 2)
+    cv2.circle(canvas, px(6.25, 0), 4, (60, 60, 230), -1)
+    cv2.circle(canvas, px(7.75, 0), 4, (60, 200, 60), -1)
+    label(canvas, 'gate', (px(7, 0)[0]+8, px(7, 0)[1]-30), .45)
+    for rows, color in ((truth, (120, 225, 140)), (ekf, (255, 180, 110))):
+        points = [px(r[1], r[2]) for r in rows[::5]]
+        if len(points) > 1:
+            cv2.polylines(canvas, [np.array(points, np.int32)], False, color, 2, cv2.LINE_AA)
+    if goal is not None:
+        cv2.drawMarker(canvas, px(goal[0], goal[1]), (255, 240, 80), cv2.MARKER_CROSS, 14, 2)
+    if truth:
+        yaw = Rotation.from_quat(truth[-1][4:8]).as_euler('xyz')[2]
+        x, y = truth[-1][1:3]
+        cv2.arrowedLine(canvas, px(x, y), px(x+.8*np.cos(yaw), y+.8*np.sin(yaw)),
+                        (120, 225, 140), 2, tipLength=.4)
+    label(canvas, 'green truth  blue EKF  + goal', (10, 20), .45, (200, 205, 210))
+    return canvas
 
 
 def metrics(estimates, truth):
@@ -199,7 +220,6 @@ def main():
     parser.add_argument('--replay-only', action='store_true', help='reuse sequence.pkl without running a vehicle action')
     for name, default in [('radius', .75), ('sweep', 360), ('step', 15), ('depth', 1.0)]:
         parser.add_argument('--scan-'+name, type=float, default=default)
-    parser.add_argument('--world', default='pool_world')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     out = args.output.resolve()
@@ -254,7 +274,12 @@ def main():
     node.create_subscription(Image, '/mira/sensors/camera/front/image_raw', lambda m: receive(m, 'rgb'), qos_profile_sensor_data)
     node.create_subscription(Image, '/mira/sensors/camera/front/depth/image_raw', lambda m: receive(m, 'depth'), qos_profile_sensor_data)
     node.create_subscription(CameraInfo, '/mira/sensors/camera/front/camera_info', lambda m: receive(m, 'info'), qos_profile_sensor_data)
-    node.create_subscription(Image, '/mira/sim/demo/third_person', lambda m: receive(m, 'third'), qos_profile_sensor_data)
+    node.create_subscription(Image, '/mira/sim/camera/chase/image_raw', lambda m: receive(m, 'third'), qos_profile_sensor_data)
+    ekf_path = []
+    node.create_subscription(PoseStamped, '/mira/state/pose', lambda m: ekf_path.append(
+        [stamp(m)*1e-9, m.pose.position.x, m.pose.position.y, m.pose.position.z]), 10)
+    node.create_subscription(PoseStamped, '/mira/guidance/goal', lambda m: data.update(
+        goal=(m.pose.position.x, m.pose.position.y)), 10)
     node.create_subscription(Odometry, '/mira/odometry/visual', lambda m: receive(m, 'live_vo'), 10)
     def ground_truth(m):
         truth.append(pose_row(m))
@@ -279,22 +304,11 @@ def main():
     recorded_extrinsics = None
     try:
         if not args.replay_only:
-            sdf_path = Path('/tmp/mira_gate_demo_observer.sdf')
-            sdf_path.write_text(OBSERVER)
-            subprocess.run(['gz', 'service', '-s', f'/world/{args.world}/remove',
-                            '--reqtype', 'gz.msgs.Entity', '--reptype', 'gz.msgs.Boolean',
-                            '--timeout', '3000', '--req', 'name: "gate_demo_observer", type: MODEL'],
-                           stdout=subprocess.DEVNULL, check=False)
-            subprocess.run(['gz', 'service', '-s', f'/world/{args.world}/create',
-                            '--reqtype', 'gz.msgs.EntityFactory', '--reptype', 'gz.msgs.Boolean',
-                            '--timeout', '5000', '--req', f'sdf_filename: "{sdf_path}"'], check=True)
-            start(['ros2', 'run', 'ros_gz_bridge', 'parameter_bridge',
-                   '/mira/sim/demo/third_person@sensor_msgs/msg/Image[gz.msgs.Image'], 'observer_bridge')
             deadline = time.monotonic()+60
             while not all(k in data for k in ('rgb', 'depth', 'info', 'third', 'boxes', 'live_vo')) or not truth or data['live_vo'].pose.covariance[0] >= 1000:
                 spin(.1)
                 if time.monotonic() > deadline:
-                    raise RuntimeError('Missing RGB/depth/external camera/boxes/truth; check bridge logs')
+                    raise RuntimeError('Missing RGB/depth/chase camera/boxes/truth; check the simulator bridge')
             writer = cv2.VideoWriter(str(out/'capture.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), 10, (1920, 1080))
             if not writer.isOpened():
                 raise RuntimeError('Cannot create demo video')
@@ -323,44 +337,47 @@ def main():
                 phase = ('COMPLETE' if 'Gate crossing complete' in action_log else
                          'CROSSING GATE' if 'Gate corridor aligned' in action_log else
                          'APPROACHING GATE' if 'Spawn scan complete' in action_log else 'SCANNING START AREA')
-                label(canvas, 'MIRA | '+phase, (24, 35), 1)
-                label(canvas, f'{now-start_time:.1f}s | Gazebo RGB-D | cuVSLAM SLAM'
-                      f'{" + downward optical flow" if flow_rows else ""}', (1050, 35), .7)
-                for title, origin in [('THIRD PERSON / actual Gazebo camera', (20, 78)),
-                                      ('ONBOARD RGB / Gazebo detections', (660, 78)),
-                                      ('BOTTOM CAMERA / optical-flow tracks (x4)', (1290, 78)),
-                                      ('REGISTERED DEPTH / metres (0-8 m)', (20, 585)),
-                                      ('cuVSLAM SLAM / reconstruction', (660, 585)),
-                                      ('OPTICAL FLOW vs TRUTH / body m/s', (1290, 585))]:
+                label(canvas, 'MIRA | '+phase, (24, 40), 1)
+                label(canvas, f'{now-start_time:5.1f}s | Gazebo RGB-D | cuVSLAM SLAM | ArduSub GUIDED + BendyRuler',
+                      (1000, 40), .65)
+                for title, origin in TITLES:
                     label(canvas, title, origin, .6)
-                third = observer_crop(bridge.imgmsg_to_cv2(data['third'], desired_encoding='bgr8'), truth[-1][1:4])
+                canvas[CHASE] = cv2.resize(bridge.imgmsg_to_cv2(data['third'], desired_encoding='bgr8'), (940, 529))
+                canvas[MAP] = cloud_view(None)
+                label(canvas, 'Built from the recorded RGB-D by replaying cuVSLAM SLAM after the pass', (980, 595), .55,
+                      (170, 175, 185))
                 rgb = bridge.imgmsg_to_cv2(data['rgb'], desired_encoding='bgr8').copy()
                 for box in data['boxes'].detections:
                     h, w = rgb.shape[:2]
                     b = box.bbox
-                    if box.results and box.results[0].hypothesis.class_id == 'gate':
+                    name = box.results[0].hypothesis.class_id if box.results else ''
+                    if name in ('gate', 'flare'):
                         x, y = b.center.position.x*w, b.center.position.y*h
                         cv2.rectangle(rgb, (int(x-b.size_x*w/2), int(y-b.size_y*h/2)),
                                       (int(x+b.size_x*w/2), int(y+b.size_y*h/2)), (0, 220, 255), 2)
+                        label(rgb, name, (int(x-b.size_x*w/2), max(18, int(y-b.size_y*h/2)-6)), .6, (0, 220, 255))
                 depth = bridge.imgmsg_to_cv2(data['depth'], desired_encoding='passthrough')
                 valid = np.isfinite(depth) & (depth > 0)
                 scaled = np.uint8(np.clip(np.nan_to_num(depth, nan=0, posinf=8)/8, 0, 1)*255)
                 depth_rgb = cv2.applyColorMap(255-scaled, cv2.COLORMAP_TURBO)
                 depth_rgb[~valid] = 0
-                canvas[90:540, 20:640] = cv2.resize(third, (PANEL_W, 450))
-                canvas[90:540, 650:1270] = cv2.resize(rgb, (PANEL_W, 450))
                 sim_now = stamp(data['rgb'])*1e-9
                 truth_now = next((v[1:] for v in reversed(truth_twist) if v[0] <= sim_now), None)
-                if 'current' in bottom:
-                    canvas[90:540, 1280:1900] = flow_panel(bottom.get('previous'), bottom['current'],
-                                                           flow_rows[-1] if flow_rows else None, truth_now)
-                canvas[595:1065, 20:640] = cv2.resize(depth_rgb, (PANEL_W, 470))
-                canvas[595:1065, 1280:1900] = speed_plot(flow_rows, truth_twist, sim_now)
+                bottom_view = (flow_panel(bottom.get('previous'), bottom['current'],
+                                          flow_rows[-1] if flow_rows else None, truth_now)
+                               if 'current' in bottom else np.zeros((450, PANEL_W, 3), np.uint8))
+                for region, image in zip(BOTTOM, (rgb, depth_rgb, bottom_view,
+                                                  route_view(truth, ekf_path, data.get('goal')))):
+                    canvas[region] = cv2.resize(image, (BOTTOM_W, BOTTOM_H))
+                events = [line.split('[mira2_actions]: ', 1)[-1] for line in action_log.splitlines()
+                          if '[mira2_actions]: ' in line and 'WARN' not in line]
+                if events:
+                    label(canvas, events[-1][:150], (20, 1055), .6, (120, 225, 140))
                 writer.write(canvas)
                 video_stamps.append(stamp(data['rgb']))
                 video_phases.append(phase)
                 cv2.imwrite(str(out/'depth.png'), depth_rgb)
-                cv2.imwrite(str(out/'third_person.png'), third)
+                cv2.imwrite(str(out/'third_person.png'), canvas[CHASE])
             writer.release()
             writer = None
             # Freeze the captured input set before running the benchmark.
@@ -387,7 +404,7 @@ def main():
         # Remove live input subscriptions: replay consumes exactly the recorded set.
         for sub in list(node.subscriptions):
             if sub.topic_name in ('/mira/sensors/camera/front/image_raw', '/mira/sensors/camera/front/depth/image_raw', '/mira/sensors/camera/front/camera_info',
-                                  '/mira/sim/ground_truth/odom', '/mira/odometry/visual', '/mira/sensors/imu', '/mira/sim/demo/third_person',
+                                  '/mira/sim/ground_truth/odom', '/mira/odometry/visual', '/mira/sensors/imu', '/mira/sim/camera/chase/image_raw',
                                   '/mira/perception/front/objects', '/mira/sensors/camera/bottom/image_raw',
                                   '/mira/odometry/flow_velocity'):
                 node.destroy_subscription(sub)
@@ -570,7 +587,7 @@ def main():
             while snapshot+1 < len(clouds) and clouds[snapshot+1][0] <= s:
                 snapshot += 1
             points = clouds[snapshot][1] if clouds and clouds[snapshot][0] <= s else None
-            canvas[595:1065, 650:1270] = cv2.resize(cloud_view(points, map_bounds), (PANEL_W, 470))
+            canvas[MAP] = cloud_view(points, map_bounds)
             writer.write(canvas)
             if i == len(video_stamps)-15:
                 cv2.imwrite(str(out/'gate_demo.jpg'), canvas)
