@@ -25,7 +25,7 @@ jobs:
       matrix:
         include:
           # ArduPilot SITL (vectored_6dof, JSON FDM bridge on 127.0.0.1:9002, QGC on 14550)
-          # Dockerfile: docker/ardupilot.Dockerfile, context: repo root (needs docker/ardusub_frame_config.parm)
+          # Dockerfile: docker/ardupilot.Dockerfile, context: repo root (needs misc/patches/ardupilot/)
           - image: ardupilot-sitl
             context: .
             dockerfile: docker/ardupilot.Dockerfile

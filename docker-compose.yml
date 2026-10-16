@@ -20,8 +20,8 @@ services:
       # /opt/mavenv/bin: MAVProxy venv (see docker/ardupilot.Dockerfile)
       - PATH=/opt/mavenv/bin:/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
-      - ./ardupilot:/ardupilot_data
-      - ./docker/ardusub_frame_config.parm:/ardusub_frame_config.parm:ro
+      - ./var/ardupilot:/ardupilot_data
+      - ./config/ardupilot/frame.parm:/params/frame.parm:ro
     network_mode: host
     entrypoint: /bin/bash
     # --custom-location and the FRAME_CONFIG=2 param file fix a verified
@@ -31,7 +31,7 @@ services:
     # that ~584m offset poisons the boot-time baro calibration, corrupting
     # every depth reading for the whole session (verified: negative absolute
     # pressure, sub-zero Kelvin temperature reported over MAVLink).
-    # The lat/lon below (63.52, 10.35) must match worlds/tacc.world's
+    # The lat/lon below (63.52, 10.35) must match src/tacc_sim/worlds/tacc.world's
     # <spherical_coordinates> - it's out in Trondheimsfjorden (verified via
     # reverse geocoding: no land features found there even at max zoom).
     # The old value (63.446827, 10.421906) was a real street/bench in
@@ -52,20 +52,30 @@ services:
     # JSON FDM bridge to Gazebo is on 127.0.0.1:9002 (--model JSON:127.0.0.1).
     command: >
       -c "
-      cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/ardusub_frame_config.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:0.0.0.0:14555"
-  # Vision-navigation variant: GPS disabled, horizontal position from
-  # src/vision_nav/vision_bridge.py (MAVLink ODOMETRY on 14555), waypoint
-  # script on 14556, RViz goal_bridge on 14557, obstacle_distance on 14558. Separate data dir so its eeprom.bin (which persists
+      cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/params/frame.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:0.0.0.0:14555"
+  # Vision-navigation variant for the Mira stack: GPS disabled, external
+  # navigation from mira2_vision's vision_bridge (MAVLink on 14555),
+  # goal_bridge on 14557, obstacle distances on 14558 (14556 spare). Separate data dir so its eeprom.bin (which persists
   # params across runs) never leaks the GPS-off settings into ardupilot-sitl.
+  # Parameters, later files win: frame -> the vehicle's own file from the mira
+  # repo (EKF source sets, VISO; what the real Pixhawk loads) -> simulator-only
+  # -> the scene's (SIM_PACKAGE, src/<package>/config/ardusub.parm).
   ardupilot-sitl-vision:
     extends: ardupilot-sitl
     volumes:
-      - ./ardupilot_vision:/ardupilot_data
-      - ./docker/ardusub_frame_config.parm:/ardusub_frame_config.parm:ro
-      - ./docker/ardusub_vision.parm:/ardusub_vision.parm:ro
+      - ./var/ardupilot_vision:/ardupilot_data
+      - ./config/ardupilot/frame.parm:/params/frame.parm:ro
+      - type: bind
+        source: ${MIRA_ROOT:-../mira}/src/mira2_hardware/config/ardusub/external_nav.parm
+        target: /params/vehicle.parm
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./config/ardupilot/sim.parm:/params/sim.parm:ro
+      - ./src/${SIM_PACKAGE:-sauvc_sim}/config:/params/competition:ro
     command: >
       -c "
-      cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/ardusub_frame_config.parm --add-param-file=/ardusub_vision.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14555 --out=udp:127.0.0.1:14556 --out=udp:127.0.0.1:14557 --out=udp:127.0.0.1:14558"
+      cd /ardupilot_data && /ardupilot/Tools/autotest/sim_vehicle.py -N -f vectored_6dof -v ArduSub --console --model JSON:127.0.0.1 --custom-location=63.520000,10.350000,0,0 --add-param-file=/params/frame.parm --add-param-file=/params/vehicle.parm --add-param-file=/params/sim.parm --add-param-file=/params/competition/ardusub.parm --out=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14555 --out=udp:127.0.0.1:14556 --out=udp:127.0.0.1:14557 --out=udp:127.0.0.1:14558"
   # Primary sim: Gazebo Harmonic + the bluerov2_gz model + ardupilot_gazebo
   # plugin (both vendored as git submodules under src/). Rendering hardware
   # is auto-detected at container start (see docker/gazebo-entrypoint.sh) -
@@ -100,10 +110,10 @@ services:
       # GZ_SIM_SYSTEM_PLUGIN_PATH/GZ_SIM_RESOURCE_PATH are also set in the
       # image, but re-declared here so `docker compose exec` / non-interactive
       # shells inherit them. Extends the baked bluerov2_gz models/worlds
-      # with this project's own worlds/ and common_resources/sauvc_sim assets
+      # with the tacc_sim/sauvc_sim assets
       # (bind-mounted below) so no colcon/ROS build is needed to use them.
       - GZ_SIM_SYSTEM_PLUGIN_PATH=/workspace/ardupilot_gazebo/build
-      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/sauvc_sim/meshes:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
+      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/tacc_sim/models:/workspace/tacc_sim/worlds:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/sauvc_sim/meshes:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
       # Also baked into the image (see docker/gazebo.Dockerfile), but
       # re-declared here so an already-running container from an older image
       # picks it up without a rebuild. Without it, `gz` doesn't register
@@ -118,10 +128,11 @@ services:
       # Forcing UDP-only transport fixes it immediately. Must match on the
       # host side too (see Makefile's `export FASTDDS_BUILTIN_TRANSPORTS`).
       - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
     volumes:
       - /dev/shm:/dev/shm
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      # X cookie written by docker/x11-setup.sh (every `make` GUI target runs
+      # X cookie written by misc/infra/x11-setup.py (every `make` GUI target runs
       # it first). create_host_path: false makes a bare `docker compose up`
       # fail loudly if it's missing, instead of Docker creating a root-owned
       # *directory* there - which then breaks X for every later run.
@@ -132,13 +143,12 @@ services:
         bind:
           create_host_path: false
       - ./docker/gazebo-entrypoint.sh:/entrypoint.sh:ro
-      - ./worlds:/workspace/worlds:ro
       - ./src/bluerov2_gz:/workspace/bluerov2_gz:ro
-      - ./src/common_resources/data/object_files:/workspace/common_resources:ro
+      - ./src/tacc_sim:/workspace/tacc_sim:ro
       - ./src/sauvc_sim:/workspace/sauvc_sim:ro
       - ./src/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/models:ro
       - ./src/ardupilot_gazebo/worlds:/workspace/ardupilot_gazebo/worlds:ro
-      - ./src/vision_nav:/workspace/vision_nav:ro
+      - ./src/dnt_simulator:/workspace/dnt_simulator:ro
     # Intel/AMD iGPU passthrough (`devices: - /dev/dri:/dev/dri`) was tried
     # here for hardware-accelerated rendering (mira-sim-gpu above covers the
     # NVIDIA case via runtime: nvidia) but is currently REVERTED: on this
@@ -179,7 +189,7 @@ services:
       - XAUTHORITY=/tmp/.docker.xauth
       - QT_X11_NO_MITSHM=1
       - GZ_SIM_SYSTEM_PLUGIN_PATH=/workspace/ardupilot_gazebo/build
-      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/sauvc_sim/meshes:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
+      - GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/tacc_sim/models:/workspace/tacc_sim/worlds:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds:/workspace/sauvc_sim/meshes:/workspace/ardupilot_gazebo/models:/workspace/ardupilot_gazebo/worlds
       - GZ_CONFIG_PATH=/usr/share/gz:/opt/ros/jazzy/opt/gz_sim_vendor/share/gz:/opt/ros/jazzy/opt/gz_transport_vendor/share/gz
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
@@ -188,6 +198,7 @@ services:
       # DDS discovery across the host/container boundary via FastDDS's SHM
       # transport; force UDP-only.
       - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
     deploy:
       resources:
         reservations:

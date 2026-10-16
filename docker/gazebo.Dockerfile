@@ -33,9 +33,9 @@ RUN apt-get update \
     gstreamer1.0-gl \
   && rm -rf /var/lib/apt/lists/*
 
-# -- Vision navigation (src/vision_nav) ------------------------------------
+# -- Navigation tools (used by the Mira stack image built on this one) -----
 # RTAB-Map RGB-D visual odometry, plus pymavlink for the ROS -> ArduSub
-# bridge. pymavlink goes in a venv for the same reason as in
+# bridges. pymavlink goes in a venv for the same reason as in
 # ardupilot.Dockerfile (Debian numpy has no pip RECORD file);
 # --system-site-packages keeps rclpy/numpy/yaml from the ROS install visible.
 RUN apt-get update \
@@ -62,7 +62,7 @@ COPY src/bluerov2_gz /workspace/bluerov2_gz
 
 # -- Environment for gz sim ------------------------------------------------
 ENV GZ_SIM_SYSTEM_PLUGIN_PATH=/workspace/ardupilot_gazebo/build
-ENV GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/worlds:/workspace/common_resources:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds
+ENV GZ_SIM_RESOURCE_PATH=/workspace/bluerov2_gz/models:/workspace/bluerov2_gz/worlds:/workspace/tacc_sim/models:/workspace/tacc_sim/worlds:/workspace/sauvc_sim/models:/workspace/sauvc_sim/worlds
 # gz-tools (the `gz` CLI) only registers a subcommand if it finds that
 # plugin's <name>.yaml under a directory on GZ_CONFIG_PATH. The apt-installed
 # libgz-sim8-dev package (needed for headers to build ardupilot_gazebo) does

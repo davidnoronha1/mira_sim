@@ -1,168 +1,72 @@
 # Mira Simulator
 
-A fully containerized underwater robotics simulator for the BlueROV2 based on **Gazebo Harmonic** and **ArduPilot SITL**.
+Gazebo Harmonic and ArduSub SITL for BlueROV2, with SAUVC and TACC competition worlds.
 
-![Mira Simulator with QGroundControl](./Screenshot%20from%202026-08-31%2017-43-31.png)
+![Simulator with QGroundControl](misc/doc/media/simulator_qgc.png)
 
-## Overview
+Requires Linux, Python 3, Docker Compose v2 and tmux. GUI runs also need X11/XWayland. NVIDIA acceleration is detected automatically; set `MIRA_GPU=0` or `1` to override.
 
-Mira combines Gazebo Harmonic, ArduPilot SITL, and the BlueROV2 model into a complete simulation environment. Everything runs in Docker—no ROS installation needed on your host.
-
-**Key Features:**
-- Real-time 3D physics with multiple underwater worlds
-- MAVLink integration with QGroundControl
-- Auto-detected GPU rendering (NVIDIA/Intel iGPU/software fallback)
-- Persistent containers for interrupted session recovery
-
-## Requirements
-
-- **Docker & Docker Compose** (v2.0+)
-- **X11 server** (for GUI; use `ssh -X` if remote)
-- **4+ CPU cores, 8GB RAM** minimum
-- **Linux** (tested on Ubuntu 22.04+)
-- Optional: **QGroundControl** (download from [qgroundcontrol.com](https://qgroundcontrol.com))
-- Optional: **NVIDIA GPU + NVIDIA Container Toolkit** (auto-detected if present)
-
-## Quick Start
+## Simulator
 
 ```bash
-# Clone and initialize submodules
-git clone <repo-url> && cd mira_sim
-git submodule update --init --recursive
-
-# Terminal 1: Start ArduPilot SITL (autopilot)
-make sitl
-
-# Terminal 2: Start Gazebo simulator
-make simulator-tacc-gz
-
-# Terminal 3: Launch QGroundControl on your host
-qgroundcontrol  # or download from qgroundcontrol.com
+python3 bringup.py submodules
+python3 bringup.py up --map sauvc
+python3 bringup.py attach
+python3 bringup.py down
 ```
 
-**That's it!** QGC auto-connects to the simulator on `127.0.0.1:14550` (UDP).
+Tmux session `mira-sim` has separate `gazebo`, `sitl` and `bridge` windows. Exited panes remain visible for log inspection. QGroundControl connects on UDP 14550.
 
-## Available Worlds
+Maps: `sauvc` (competition), `sauvc_quali`, `tacc`, `bluerov`.
 
 ```bash
-make simulator-tacc-gz   # TACC pipeline world
-make simulator-sauvc-gz  # SAUVC competition world
+python3 bringup.py up --map tacc --headless
+python3 bringup.py up --map sauvc --no-sitl
+python3 bringup.py up --mode gazebo --map tacc  # Gazebo alone
+python3 bringup.py shell                       # Gazebo container shell
+python3 bringup.py check                       # Validate Compose and print commands
+python3 bringup.py build                       # Rebuild simulator images
 ```
 
-## Container Management
+Stop the current run before changing maps or modes. `down` stops only the simulation containers and tmux session while retaining runtime data.
+
+## Connect the Mira stack
+
+In Mira's normal container or configured ROS environment:
 
 ```bash
-# Restart containers (surviving Ctrl-C)
-make shell              # Attach shell to Gazebo container
-docker compose stop     # Stop all services
-docker compose down     # Stop and remove containers
-docker compose build    # Rebuild images locally
+make guided-sim
+# Or: ros2 launch mira2_hardware guided_sim.launch.py
 ```
 
-**Services:**
-- `ardupilot-sitl` — Autopilot (listening on 14550/UDP)
-- `mira_sim` — Gazebo simulator (auto-detects GPU)
-- `mira-sim-gpu` — Explicit NVIDIA GPU variant
+The new launch reuses the normal guided stack, supplies localhost SITL links and Gazebo sensor topics, and enables simulation time. `mira2_vision` already accepts ROS image topics. Actions remain a separate normal Mira launch.
 
-Force GPU selection:
-```bash
-MIRA_GPU=1 make simulator-tacc-gz    # Force NVIDIA
-MIRA_GPU=0 make simulator-tacc-gz    # Force software rendering
-```
+There are three containers when both are running: Gazebo, SITL, and the original Mira container. The simulator never starts or stops Mira. Build Mira using its normal commands after adding the launch file.
 
-## Competition Bringup
+See [connection settings](misc/doc/MIRA_STACK.md) for topic overrides, optical flow, coordinate origins and optional auto-arming.
 
-Tmux sessions with persistent containers:
+## Layout
 
-```bash
-make bringup-tacc    # TACC world
-make bringup-sauvc   # SAUVC world (with ros_gz_bridge)
-make bringdown       # Stop all bringup containers (-t 0)
-
-# Skip ArduPilot SITL container:
-NO_ARDUPILOT=1 make bringup-tacc
-NO_ARDUPILOT=1 make bringup-sauvc
-
-tmux attach -t mira-tacc    # Attach to session
-tmux kill-session -t mira-tacc  # Kill session
-```
-
-## Vision Navigation (GPS-free)
-
-ArduSub with GPS disabled, localised from the front RGB-D camera (RTAB-Map visual odometry), flying GUIDED waypoints. Needs a locally built Gazebo image and an NVIDIA GPU for a usable camera rate.
-
-[![Click-to-go demo: Gazebo (left) and RViz (right)](./docs/media/vision_nav_demo.jpg)](./docs/media/vision_nav_demo.mp4)
-
-*[Demo video](./docs/media/vision_nav_demo.mp4) (2x speed): a "2D Goal Pose" dragged in RViz sends ArduSub to the SAUVC gate; BendyRuler steers it around the orange flare using the depth camera. Recorded with `make record-demo` on software rendering, with Gazebo ground truth as the position source (`VISION_SOURCE=gt`).*
-
-```bash
-docker compose build mira-sim-gpu          # adds rtabmap + pymavlink + rviz2
-make bringup-vision                        # SAUVC pool, VO-driven ArduSub + RViz: "2D Goal Pose" sends it there
-make bringup-vision VISION_MAP=tacc        # same on the TACC world
-make waypoints                             # fly the map's tour (src/vision_nav/waypoints/sauvc_tour.yaml)
-make compare-odom                          # VO drift vs ground truth
-make bringup-vision VISION_SOURCE=gt       # debug only: Gazebo truth instead of VO
-make record-demo                           # video: Gazebo + RViz, 2D Goal Pose, avoidance
-```
-
-Details, frames and tuning: [docs/VISION_NAV.md](./docs/VISION_NAV.md).
-
-For navigation without GUI overhead: `make bringup-vision HEADLESS=1 VISUALIZE=0`.
-Ground-truth runs skip VO unless `VISION_COMPARE=1`. Display paths are bounded
-and rate-limited; camera/cloud bridges only activate when subscribed.
-Gazebo CPU quotas are configurable with `MIRA_SIM_CPUS` (default `0`, unlimited).
-See [efficiency controls](./docs/VISION_NAV.md#efficiency-controls) for settings,
-persistent-container recreation, and regression tests.
-
-## Troubleshooting
-
-For detailed troubleshooting steps (X11 issues, QGC connection, performance tuning, etc.), see [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md).
-
-## Structure
-
-```
+```text
 mira_sim/
-├── docker-compose.yml            # Service definitions
-├── docker/                        # Dockerfiles & startup scripts
-├── worlds/                        # Custom Gazebo world files
-├── ardupilot/                     # SITL config directory
+├── bringup.py                 # Simulator commands, configuration and tmux lifecycle
+├── docker-compose.yml         # Gazebo and SITL
+├── docker/                    # Simulator Dockerfiles and entrypoint
+├── config/ardupilot/           # Global frame and simulator parameters
+├── misc/
+│   ├── doc/                   # Guides, reports and media
+│   ├── infra/                 # Host helpers
+│   ├── patches/               # Third-party patches
+│   └── tools/                 # Diagnostics (inside Mira: /sim/misc/tools)
 ├── src/
-│   ├── bluerov2_gz/              # BlueROV2 model (submodule)
-│   ├── ardupilot_gazebo/         # FDM bridge (submodule)
-│   ├── vision_nav/               # RGB-D VO -> ArduSub bridge, waypoints
-│   └── sauvc_sim/                # SAUVC models (submodule)
-├── Makefile
-├── GAZEBO_NOTES.md               # Technical integration notes
-└── docs/
-    └── TROUBLESHOOTING.md        # Detailed debugging guide
+│   ├── ardupilot_gazebo/       # ArduPilot plugin submodule
+│   ├── bluerov2_gz/            # Vehicle models submodule
+│   ├── sauvc_sim/              # Competition worlds, models and config (submodule)
+│   ├── tacc_sim/               # Competition worlds, models and config
+│   └── dnt_simulator/          # Gazebo-to-ROS bridge launch files
+└── var/                       # Persistent SITL parameters and logs (ignored)
 ```
 
-## Building Locally
+Optional host ROS development: `python3 bringup.py install-deps`, `host-build` (optionally `--package NAME`), and `clean`. Requires ROS Jazzy and uv on the host; container simulation does not require host ROS.
 
-Rebuild Docker images after editing code:
-
-```bash
-docker compose build
-docker compose up --build --no-recreate -d
-```
-
-First build takes 30-45 minutes (ArduPilot compilation).
-
-## Learn More
-
-- [GAZEBO_NOTES.md](./GAZEBO_NOTES.md) — Technical background on Gazebo Harmonic migration & known fixes
-- [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) — Debugging guide
-- [Gazebo Docs](https://gazebosim.org)
-- [ArduPilot Docs](https://ardupilot.org)
-- [ArduSub Manual](https://www.ardusub.com)
-
-## License
-
-Apache License 2.0. See [LICENSE](./LICENSE).
-
-## Integrated Mira packages
-
-Use `make mira-stack-build` then `make bringup-mira` to run the sibling Mira
-checkout's `mira2_vision`, `mira2_hardware`, and single `mira2_actions` demo.
-See [Mira stack integration](docs/MIRA_STACK.md) for model selection, controls,
-headless operation, and how this differs from the standalone VO test rig.
+Apache License 2.0; see [LICENSE](LICENSE).

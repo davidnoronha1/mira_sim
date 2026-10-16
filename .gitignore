@@ -1,7 +1,8 @@
 # Ignore build directory
 build/
 
-ardupilot/
+# SITL runtime data (eeprom.bin, logs), written by the containers as root
+var/
 
 # Ignore install directory
 install/
@@ -34,13 +35,7 @@ __pycache__/
 *.py[codz]
 *$py.class
 
-ardupilot/
-ardupilot/*
-ardupilot_vision/
 .vscode/
 
 # make record-demo output
 recordings/
-
-# Isolated builds of the sibling Mira stack
-.mira-stack/

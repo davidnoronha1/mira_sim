@@ -1,0 +1,48 @@
+# Simulator-only ArduSub settings for the vision SITL (ardupilot-sitl-vision).
+# Load order (compose): frame.parm -> mira's vehicle file
+# (mira/src/mira2_hardware/config/ardusub/external_nav.parm: EKF source sets,
+# VISO) -> this file -> the scene's ardusub.parm (src/<package>/config/).
+# Only what differs from the real vehicle belongs here.
+
+# The ardupilot_gazebo plugin sends no_time_sync=true, which makes SITL
+# default AHRS_EKF_TYPE to 10 (simulator ground truth, no EKF - external nav
+# would be silently ignored). The model runs lock_step, so EKF3 is safe.
+AHRS_EKF_TYPE    3
+SIM_GPS1_ENABLE  0
+
+# Without GPS, auto-declination only kicks in once vision_bridge sets the EKF
+# origin - after the heading has already initialised - so the EKF yaw then
+# slowly swings ~4.7 deg. Pin the declination for SITL's fixed
+# --custom-location (value is what COMPASS_AUTODEC computes for 63.52N 10.35E).
+COMPASS_AUTODEC  0
+COMPASS_DEC      0.082045
+
+# --- Object avoidance: needs our patched ArduSub (misc/patches/ardupilot/ardusub_object_avoidance.patch);
+# stock ArduSub on the vehicle ignores these. ---
+# Depth camera -> OBSTACLE_DISTANCE -> proximity -> object database ->
+# BendyRuler, which bends GUIDED legs around obstacles. Defaults are sized for
+# drones in open air (5 m margin, 15 m lookahead) and would block a 25 m pool.
+PRX1_TYPE          2
+PRX_FILT           1
+OA_TYPE            1
+# AUV half-width 0.29 m + ~0.2 m position error; gate posts are 0.75 m
+# either side of the gate centre, so it still fits through
+OA_MARGIN_MAX      0.5
+OA_BR_LOOKAHEAD    3
+OA_DB_BEAM_WIDTH   1.2
+OA_DB_DIST_MAX     8
+
+# Face along the path in GUIDED (also needs the patch: stock ArduSub holds
+# the current heading when a position target has no yaw). With OA this is the
+# bent path around obstacles, so the forward depth camera looks where the
+# AUV is going.
+WP_YAW_BEHAVIOR    1
+
+# Cap the yaw rate (default 0 = unlimited; ~80 deg/s seen in SITL). Fast spins
+# smear the camera images and VO under-reads the motion. The GUIDED heading
+# slew uses a fixed rate, so ATC_RATE_WPY_MAX would not cover it. Tuned in
+# simulation only; check on the vehicle before copying it there.
+ATC_RATE_Y_MAX     30
+
+# Log before arming too: EKF bootstrap problems happen while disarmed.
+LOG_DISARMED     1

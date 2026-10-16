@@ -31,7 +31,7 @@ RUN git submodule update --init --recursive
 # without a yaw follows WP_YAW_BEHAVIOR (e.g. face along the path) instead of
 # freezing the current heading. Written against master @ 30a9288; if a newer
 # master no longer applies, regenerate the patch.
-COPY docker/ardusub_object_avoidance.patch /tmp/ardusub_object_avoidance.patch
+COPY misc/patches/ardupilot/ardusub_object_avoidance.patch /tmp/ardusub_object_avoidance.patch
 RUN git apply /tmp/ardusub_object_avoidance.patch
 
 # Trick to get apt-get to not prompt for timezone in tzdata
