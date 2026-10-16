@@ -1,5 +1,7 @@
-FROM ardupilot/ardupilot-dev-base:edge
-
+# ArduSub SITL. The builder stage needs the full ArduPilot toolchain; the
+# runtime stage keeps only what `sim_vehicle.py -N` uses: the ardusub binary,
+# Tools/autotest (sim_vehicle.py, pysim, default params) and MAVProxy.
+#
 # QGC connectivity: SITL exposes MAVLink on tcp 5760 (primary) and udp 14550
 # (QGC default). The JSON bridge to the Gazebo ArduPilotPlugin is on
 # 127.0.0.1:9002 (--model JSON:127.0.0.1). When run via docker-compose.yml the
@@ -7,21 +9,14 @@ FROM ardupilot/ardupilot-dev-base:edge
 # (or any device on the same network) can connect without extra flags.
 # See compose file for the full bringup command including --custom-location
 # fix for the depth-hold baro/altitude bug.
+FROM ardupilot/ardupilot-dev-base:edge AS build
 
-# ARG COPTER_TAG=Copter-4.5.7
+RUN apt-get update && apt-get install --no-install-recommends -y git \
+  && git config --global url."https://github.com/".insteadOf git://github.com/
 
-# install git
-RUN apt-get update && apt-get install --no-install-recommends -y git; git config --global url."https://github.com/".insteadOf git://github.com/
-
-# Now grab ArduPilot from GitHub
 RUN git clone --depth=1 https://github.com/ArduPilot/ardupilot.git /ardupilot
 WORKDIR /ardupilot
-
-# Checkout the latest Copter...
-# RUN git checkout master
-
-# Now start build instructions from http://ardupilot.org/dev/docs/setting-up-sitl-on-linux.html
-RUN git submodule update --init --recursive
+RUN git submodule update --init --recursive --depth=1
 
 # Enable ArduPilot's object-avoidance path planner (OA_TYPE: BendyRuler /
 # Dijkstra) and the proximity library (PRX*_TYPE, e.g. MAVLink
@@ -34,16 +29,29 @@ RUN git submodule update --init --recursive
 COPY misc/patches/ardupilot/ardusub_object_avoidance.patch /tmp/ardusub_object_avoidance.patch
 RUN git apply /tmp/ardusub_object_avoidance.patch
 
-# Trick to get apt-get to not prompt for timezone in tzdata
+# Only the vehicle the simulator flies.
+RUN ./waf configure --board sitl && ./waf sub
+
+FROM ubuntu:24.04
+
 ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    python3 python3-venv procps tzdata \
+  && rm -rf /var/lib/apt/lists/*
 
-# Need sudo and lsb-release for the installation prerequisites
-RUN apt-get install -y --no-install-recommends sudo lsb-release tzdata python3-venv
+# MAVProxy fans SITL out to the --out ports and provides --console. Its
+# declared dependencies include VTK, OpenCV and matplotlib (~1 GB) for the
+# map/graph GUI modules, which SITL never loads; install the core only.
+RUN python3 -m venv /opt/mavenv \
+  && /opt/mavenv/bin/pip install --no-cache-dir --no-deps MAVProxy \
+  && /opt/mavenv/bin/pip install --no-cache-dir pymavlink pyserial numpy defusedxml pynmeagps pexpect
+ENV PATH="/opt/mavenv/bin:${PATH}"
 
-# Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
-RUN ./waf distclean
-RUN ./waf configure --board sitl
-RUN ./waf build
+COPY --from=build /ardupilot/build/sitl/bin/ardusub /ardupilot/build/sitl/bin/ardusub
+COPY --from=build /ardupilot/Tools/autotest /ardupilot/Tools/autotest
+# sim_vehicle.py checks the vehicle source directory exists.
+COPY --from=build /ardupilot/ArduSub /ardupilot/ArduSub
+WORKDIR /ardupilot
 
 # MAVLink for QGC / companion computer; JSON FDM bridge to Gazebo.
 EXPOSE 5760/tcp
@@ -52,12 +60,6 @@ EXPOSE 14550/udp
 EXPOSE 14555/udp
 EXPOSE 9002/tcp
 EXPOSE 9002/udp
-
-# Install MAVProxy in a venv: the Debian-packaged numpy has no pip RECORD file, so
-# installing into the system site-packages fails with "uninstall-no-record-file".
-RUN python3 -m venv --system-site-packages /opt/mavenv \
-  && /opt/mavenv/bin/pip install --no-cache-dir MAVProxy pymavlink
-ENV PATH="/opt/mavenv/bin:${PATH}"
 
 # Default command is overridden by docker-compose.yml (which adds --custom-location,
 # --add-param-file and --out for QGC). This ENTRYPOINT remains usable for
