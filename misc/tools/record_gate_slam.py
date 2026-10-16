@@ -24,7 +24,8 @@ import rclpy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PoseStamped, TransformStamped, TwistWithCovarianceStamped
 from nav_msgs.msg import Odometry
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.executors import SingleThreadedExecutor
+from rclpy.qos import QoSProfile, qos_profile_sensor_data
 from rclpy.serialization import serialize_message, deserialize_message
 from scipy.spatial.transform import Rotation, Slerp
 from sensor_msgs.msg import CameraInfo, Image, Imu
@@ -226,6 +227,14 @@ def main():
     out = args.output.resolve()
     rclpy.init()
     node = rclpy.create_node('gate_demo_recorder')
+    # Callbacks run on their own thread so rendering and disk stalls never drop
+    # camera or IMU messages: the SLAM replay needs every frame and sample.
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    ros_thread = threading.Thread(target=executor.spin, daemon=True)
+    ros_thread.start()
+    sensor_qos = QoSProfile(depth=30, reliability=qos_profile_sensor_data.reliability,
+                            durability=qos_profile_sensor_data.durability)
     node.dist_coeffs = None
     bridge = CvBridge()
     tf_buffer = Buffer()
@@ -248,9 +257,7 @@ def main():
         return process
 
     def spin(seconds):
-        end = time.monotonic()+seconds
-        while time.monotonic() < end:
-            rclpy.spin_once(node, timeout_sec=.02)
+        time.sleep(seconds)  # callbacks are serviced by the executor thread
 
     def receive(msg, key):
         data[key] = msg
@@ -272,9 +279,9 @@ def main():
         if all(math.isfinite(v) and v < 9999 for v in msg.pose.covariance[::7]):
             estimates[key][stamp(msg)] = pose_row(msg)
 
-    node.create_subscription(Image, '/mira/sensors/camera/front/image_raw', lambda m: receive(m, 'rgb'), qos_profile_sensor_data)
-    node.create_subscription(Image, '/mira/sensors/camera/front/depth/image_raw', lambda m: receive(m, 'depth'), qos_profile_sensor_data)
-    node.create_subscription(CameraInfo, '/mira/sensors/camera/front/camera_info', lambda m: receive(m, 'info'), qos_profile_sensor_data)
+    node.create_subscription(Image, '/mira/sensors/camera/front/image_raw', lambda m: receive(m, 'rgb'), sensor_qos)
+    node.create_subscription(Image, '/mira/sensors/camera/front/depth/image_raw', lambda m: receive(m, 'depth'), sensor_qos)
+    node.create_subscription(CameraInfo, '/mira/sensors/camera/front/camera_info', lambda m: receive(m, 'info'), sensor_qos)
     node.create_subscription(Image, '/mira/sim/camera/chase/image_raw', lambda m: receive(m, 'third'), qos_profile_sensor_data)
     ekf_path = []
     node.create_subscription(PoseStamped, '/mira/state/pose', lambda m: ekf_path.append(
@@ -324,7 +331,7 @@ def main():
                               *[f'scan_{name}:={getattr(args, "scan_"+name)}' for name in ('radius', 'sweep', 'step', 'depth')]], 'gate_action')
             print('CAPTURE started; gate behavior is owned by mira2_actions', flush=True)
             while time.monotonic()-start_time < args.seconds:
-                rclpy.spin_once(node, timeout_sec=.005)
+                time.sleep(.005)
                 now = time.monotonic()
                 if gate is not None and gate.poll() is not None and finished is None:
                     finished = now
@@ -515,6 +522,14 @@ def main():
                              'coverage': len(poses)/max(1, len(dataset)),
                              'all_valid_metrics': metrics(list(poses.values()), gt)}
         result['imu_fused'] = have_imu
+        # Replay input completeness: a gap lets the tracker alias rotation over the
+        # repeating floor grid, and the map silently inherits the error.
+        frame_gaps = np.diff([f[0] for f in dataset])*1e-9 if len(dataset) > 1 else np.zeros(1)
+        imu_gaps = np.diff([x[0] for x in imu_samples])*1e-9 if len(imu_samples) > 1 else np.zeros(1)
+        result['max_frame_gap_s'], result['max_imu_gap_s'] = float(frame_gaps.max()), float(imu_gaps.max())
+        if frame_gaps.max() > .3 or (have_imu and imu_gaps.max() > .3):
+            print(f'WARNING: recording dropped input (frame gap {frame_gaps.max():.2f} s, '
+                  f'IMU gap {imu_gaps.max():.2f} s); the replayed map may be wrong', flush=True)
         result['imu_samples'] = len(imu_samples)
         if comparison is not None:
             result['cuvslam_rgbd_only_same_frames'] = {
@@ -634,6 +649,8 @@ def main():
                     process.wait(timeout=5)
         for stream in files:
             stream.close()
+        executor.shutdown()
+        ros_thread.join(timeout=5)
         node.destroy_node()
         rclpy.shutdown()
 
