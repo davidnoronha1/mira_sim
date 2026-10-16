@@ -47,3 +47,31 @@
   lazy: true
   subscriber_queue: 1
   publisher_queue: 1
+# 1 kHz FRD IMU (the same sensor ArduSub flies on) for visual-inertial odometry.
+# Deeper queues: dropped IMU samples break cuVSLAM's preintegration.
+- ros_topic_name: /vision/imu
+  gz_topic_name: /world/pool_world/model/bluerov2_heavy/link/base_link/sensor/imu_sensor/imu
+  ros_type_name: sensor_msgs/msg/Imu
+  gz_type_name: gz.msgs.IMU
+  direction: GZ_TO_ROS
+  lazy: true
+  subscriber_queue: 100
+  publisher_queue: 100
+# Downward camera (model.sdf bottom_camera) for optical-flow velocity. Gazebo
+# publishes its info on the bare /camera_info (topic has no parent namespace).
+- ros_topic_name: /vision/bottom/image
+  gz_topic_name: /bottom_camera
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
+  direction: GZ_TO_ROS
+  lazy: true
+  subscriber_queue: 1
+  publisher_queue: 1
+- ros_topic_name: /vision/bottom/camera_info
+  gz_topic_name: /camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: gz.msgs.CameraInfo
+  direction: GZ_TO_ROS
+  lazy: true
+  subscriber_queue: 1
+  publisher_queue: 1
