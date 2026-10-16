@@ -1,0 +1,3 @@
+# Scene tacc: no scene-specific autopilot settings. No optical_flow.yaml here
+# either: the floor depth and floor lines of this world are not characterised,
+# so POSE_SOURCE=optical_flow is unsupported in this scene.
