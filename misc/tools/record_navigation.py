@@ -35,6 +35,8 @@ def main():
     tf_listener = TransformListener(tf_buffer, node)
     data, paths = {}, {'ekf': [], 'truth': []}
     truth_samples = []
+    # Full poses (t, x, y, z, qx, qy, qz, qw) in odom for 3D replay.
+    poses = {'ekf': [], 'truth': []}
 
     def image(msg):
         data['image'] = bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8').copy()
@@ -43,6 +45,9 @@ def main():
         p = msg.pose if key == 'ekf' else msg.pose.pose
         data[key] = p
         paths[key].append((p.position.x, p.position.y))
+        q = p.orientation
+        poses[key].append([msg.header.stamp.sec + msg.header.stamp.nanosec*1e-9,
+                           p.position.x, p.position.y, p.position.z, q.x, q.y, q.z, q.w])
         if key == 'truth':
             truth_samples.append([msg.header.stamp.sec + msg.header.stamp.nanosec*1e-9,
                                   p.position.x, p.position.y, p.position.z])
@@ -61,11 +66,18 @@ def main():
     node.create_subscription(PoseStamped, '/mira/state/pose', lambda m: pose('ekf', m), 10)
     node.create_subscription(Odometry, '/mira/sim/ground_truth/odom', lambda m: pose('truth', m), 10)
     node.create_subscription(Odometry, '/mira/odometry/visual', lambda m: data.update(vo=m), 10)
-    node.create_subscription(PoseStamped, '/mira/guidance/goal', lambda m: data.update(goal=m.pose), 10)
+    def goal(msg):
+        data['goal'] = msg.pose
+        data.setdefault('goals', []).append([msg.header.stamp.sec + msg.header.stamp.nanosec*1e-9,
+                                             msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
+    node.create_subscription(PoseStamped, '/mira/guidance/goal', goal, 10)
     def scan(msg):
         data['scan'] = msg
         data['scan_samples'] = data.get('scan_samples', 0)+1
     node.create_subscription(LaserScan, '/mira/perception/front/obstacles', scan, qos_profile_sensor_data)
+    # Optional third-person view from the vehicle model's chase camera.
+    node.create_subscription(Image, '/mira/sim/camera/chase/image_raw',
+                             lambda m: data.update(chase=m), qos_profile_sensor_data)
     deadline = time.monotonic() + 45
     while not all(k in data for k in ('image', 'boxes', 'ekf', 'truth', 'vo')):
         rclpy.spin_once(node, timeout_sec=.05)
@@ -74,6 +86,14 @@ def main():
     writer = cv2.VideoWriter(str(output), cv2.VideoWriter_fourcc(*'mp4v'), 15, (1280, 800))
     if not writer.isOpened():
         raise RuntimeError('Cannot open video writer')
+    chase_deadline = time.monotonic() + 10
+    while 'chase' not in data and time.monotonic() < chase_deadline:
+        rclpy.spin_once(node, timeout_sec=.05)
+    chase_path = output.with_name(output.stem + '_3d.mp4')
+    chase_writer = (cv2.VideoWriter(str(chase_path), cv2.VideoWriter_fourcc(*'mp4v'), 15, (1280, 720))
+                    if 'chase' in data else None)
+    if chase_writer is None:
+        print('No chase camera images; writing only the telemetry video', flush=True)
     log_path = output.with_suffix('.log')
     log = log_path.open('w')
     process, finished = None, None
@@ -175,8 +195,27 @@ def main():
             for i, line in enumerate(events[-2:]):
                 text(canvas, line[:105], 24, 727+i*25, .55)
             text(canvas, 'Orange points: depth proximity sent to ArduPilot. Boxes substitute for YOLO. No RTAB-Map node.', 24, 785, .5, (155, 165, 175))
+            scene = None
+            if chase_writer is not None:
+                scene = cv2.resize(bridge.imgmsg_to_cv2(data['chase'], desired_encoding='bgr8'), (1280, 720))
+                shade = scene.copy()
+                cv2.rectangle(shade, (0, 0), (1280, 92), (24, 19, 14), -1)
+                cv2.rectangle(shade, (0, 650), (1280, 720), (24, 19, 14), -1)
+                scene = cv2.addWeighted(shade, .62, scene, .38, 0)
+                text(scene, 'MIRA  /  THIRD-PERSON VIEW', 28, 40, .9)
+                text(scene, 'Gazebo chase camera on the vehicle  /  cuVSLAM GPU  /  ArduSub GUIDED + BendyRuler', 28, 72, .55)
+                text(scene, f'{elapsed:05.1f}s', 1170, 40, .6)
+                inset = cv2.resize(view, (384, 288))
+                cv2.rectangle(inset, (0, 0), (383, 287), (40, 210, 255), 2)
+                scene[346:634, 880:1264] = inset
+                text(scene, 'ONBOARD CAMERA', 884, 338, .5)
+                p = data['truth'].position
+                text(scene, status, 28, 692, .75, (160, 225, 100) if success else (40, 210, 255))
+                text(scene, f'Depth {-p.z:.2f} m   |   Flare clearance {data.get("flare_min", 0):.2f} m', 760, 692, .55)
             while next_frame <= now:
                 writer.write(canvas)
+                if scene is not None:
+                    chase_writer.write(scene)
                 next_frame += 1/15
         if process is None or process.poll() != 0:
             raise RuntimeError('Navigation did not complete successfully; inspect '+str(log_path))
@@ -192,7 +231,10 @@ def main():
                     'min_flare_center_distance_m': clearance,
                     'flare_cleared_conservative_hull_radius': clearance > .575,
                     'depth_proximity_samples': data.get('scan_samples', 0),
-                    'truth_txyz': truth_samples}
+                    'truth_txyz': truth_samples,
+                    'truth_pose_txyzq': poses['truth'], 'ekf_pose_txyzq': poses['ekf'],
+                    'goals_txyz': data.get('goals', []),
+                    'events': [line for line in log_path.read_text().splitlines() if '[mira2_actions]' in line]}
         output.with_suffix('.json').write_text(json.dumps(evidence, indent=2))
         if not passed or clearance <= .575:
             raise RuntimeError('Tree arrived, but gate/flare ground-truth validation failed: '+str(evidence)[:400])
@@ -202,6 +244,8 @@ def main():
             process.terminate()
             process.wait(timeout=5)
         writer.release()
+        if chase_writer is not None:
+            chase_writer.release()
         log.close()
         node.destroy_node()
         rclpy.shutdown()

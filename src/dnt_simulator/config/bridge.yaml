@@ -78,3 +78,12 @@
   lazy: true
   subscriber_queue: 1
   publisher_queue: 1
+# Third-person chase camera on the vehicle model, for demo videos only.
+- ros_topic_name: /mira/sim/camera/chase/image_raw
+  gz_topic_name: /sim/chase_camera/image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
+  direction: GZ_TO_ROS
+  lazy: true
+  subscriber_queue: 1
+  publisher_queue: 1
