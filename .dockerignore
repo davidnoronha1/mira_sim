@@ -1,0 +1,34 @@
+# Context for docker/gazebo.Dockerfile and docker/ardupilot.Dockerfile. They
+# copy only src/ardupilot_gazebo, src/bluerov2_gz, docker/ and misc/patches;
+# everything else is mounted at runtime. Patterns are relative to this
+# directory; use **/ for any depth.
+
+# VCS and editor state
+.git/
+**/.git
+.vscode/
+**/__pycache__/
+**/.pytest_cache/
+**/*.py[codz]
+
+# SITL runtime data (written as root), environments and old stack outputs
+var/
+.venv/
+.mira-stack/
+build/
+install/
+log/
+recordings/
+
+# The image builds the ArduPilot Gazebo plugin itself
+src/ardupilot_gazebo/build/
+
+# Mounted at runtime, never copied into an image
+src/sauvc_sim/
+src/tacc_sim/
+src/dnt_simulator/
+src/bluerov2_control/
+
+# Documentation media
+misc/doc/media/
+**/*.mp4
